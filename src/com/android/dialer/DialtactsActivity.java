@@ -38,6 +38,7 @@ import android.provider.ContactsContract.Intents;
 import android.provider.ContactsContract.Intents.UI;
 import android.speech.RecognizerIntent;
 import android.telephony.TelephonyManager;
+import android.telephony.TelephonyManager;
 import android.text.Editable;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
@@ -95,6 +96,9 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
     private static final String PHONE_PACKAGE = "com.android.phone";
     private static final String CALL_SETTINGS_CLASS_NAME =
             "com.android.phone.CallFeaturesSetting";
+    private static final String MSIM_CALL_SETTINGS_CLASS_NAME =
+            "com.android.phone.MSimCallFeaturesSetting";
+
     /** @see #getCallOrigin() */
     private static final String CALL_ORIGIN_DIALTACTS =
             "com.android.dialer.DialtactsActivity";
@@ -875,7 +879,11 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
     /** Returns an Intent to launch Call Settings screen */
     public static Intent getCallSettingsIntent() {
         final Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.setClassName(PHONE_PACKAGE, CALL_SETTINGS_CLASS_NAME);
+        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+            intent.setClassName(PHONE_PACKAGE, MSIM_CALL_SETTINGS_CLASS_NAME);
+        } else {
+            intent.setClassName(PHONE_PACKAGE, CALL_SETTINGS_CLASS_NAME);
+        }
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return intent;
     }

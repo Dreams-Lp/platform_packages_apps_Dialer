@@ -42,6 +42,7 @@ import android.provider.Contacts.Phones;
 import android.provider.Contacts.PhonesColumns;
 import android.provider.ContactsContract.Intents;
 import android.provider.Settings;
+import android.telephony.TelephonyManager;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
@@ -174,6 +175,8 @@ public class DialpadFragment extends Fragment
     // This is the amount of screen the dialpad fragment takes up when fully displayed
     private static final float DIALPAD_SLIDE_FRACTION = 0.67f;
 
+    private static final String SUBSCRIPTION_KEY = "subscription";
+
     private static final String EMPTY_NUMBER = "";
     private static final char PAUSE = ',';
     private static final char WAIT = ';';
@@ -223,6 +226,7 @@ public class DialpadFragment extends Fragment
      */
     private String mProhibitedPhoneNumberRegexp;
 
+    private int mSubscription = 0;
 
     // Last number dialed, retrieved asynchronously from the call DB
     // in onCreate. This number is displayed when the user hits the
@@ -1623,13 +1627,47 @@ public class DialpadFragment extends Fragment
      * @see TelephonyManager#getVoiceMailNumber()
      */
     private boolean isVoicemailAvailable() {
-        try {
-            return getTelephonyManager().getVoiceMailNumber() != null;
-        } catch (SecurityException se) {
-            // Possibly no READ_PHONE_STATE privilege.
-            Log.w(TAG, "SecurityException is thrown. Maybe privilege isn't sufficient.");
+        boolean promptEnabled = Settings.Global.getInt(getActivity().getContentResolver(),
+                Settings.Global.MULTI_SIM_VOICE_PROMPT, 0) == 1;
+        Log.d(TAG, "prompt enabled :  "+ promptEnabled);
+
+        if (promptEnabled) {
+            return hasVMNumber();
+        } else {
+            try {
+                if (TelephonyManager.getDefault().isMultiSimEnabled()) {
+                    mSubscription = TelephonyManager.getDefault().
+                            getPreferredVoiceSubscription();
+                    Log.d(TAG, "Voicemail preferred sub id = "+ mSubscription);
+                    return (TelephonyManager.getDefault().
+                            getVoiceMailNumber(mSubscription) != null);
+                } else {
+                    return getTelephonyManager().getVoiceMailNumber() != null;
+                }
+            } catch (SecurityException se) {
+                // Possibly no READ_PHONE_STATE privilege.
+                Log.e(TAG, "SecurityException is thrown. Maybe privilege isn't sufficient.");
+            }
         }
         return false;
+    }
+
+    private boolean hasVMNumber() {
+        boolean hasVMNum = false;
+        int phoneCount = TelephonyManager.getDefault().getPhoneCount();
+
+        for (int i = 0; i < phoneCount; i++) {
+            try {
+                hasVMNum = TelephonyManager.getDefault().getVoiceMailNumber(i) != null;
+            } catch (SecurityException se) {
+                // Possibly no READ_PHONE_STATE privilege.
+                Log.e(TAG, "hasVMNumber: SecurityException, Maybe privilege isn't sufficient.");
+            }
+            if (hasVMNum) {
+                break;
+            }
+        }
+        return hasVMNum;
     }
 
     /**
@@ -1706,6 +1744,7 @@ public class DialpadFragment extends Fragment
     private Intent newFlashIntent() {
         final Intent intent = CallUtil.getCallIntent(EMPTY_NUMBER);
         intent.putExtra(EXTRA_SEND_EMPTY_FLASH, true);
+        intent.putExtra(SUBSCRIPTION_KEY, mSubscription);
         return intent;
     }
 
