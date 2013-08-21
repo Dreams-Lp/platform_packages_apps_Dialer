@@ -511,4 +511,9 @@
     <!-- Message displayed when there is no application available to handle the add contact menu option. [CHAR LIMIT=NONE] -->
     <string name="add_contact_not_available">Re-enable the People application to use this feature.</string>
 
+    <string name="description_playback_start_stop">Play or stop playback</string>
+    <string name="description_playback_speakerphone">Switch on or off speakerphone</string>
+    <string name="description_rate_decrease">Decrease playback rate</string>
+    <string name="description_rate_increase">Increase playback rate</string>
+    <string name="description_playback_seek">Seek playback position</string>
 </resources>
