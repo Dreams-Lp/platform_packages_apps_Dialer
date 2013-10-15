@@ -55,10 +55,15 @@ import com.android.contacts.common.activity.TransactionSafeActivity;
 import com.android.contacts.common.util.ContactDisplayUtils;
 import com.android.dialer.R;
 import com.android.dialer.contact.ContactUpdateService;
+import com.android.dialer.DialtactsActivity;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import com.android.internal.telephony.RILConstants.SimCardID;
+import android.os.SystemProperties;
+import android.util.Log;
 
 /**
  * Initiates phone calls or a text message. If there are multiple candidates, this class shows a
@@ -189,20 +194,23 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
         private static final String ARG_PHONE_LIST = "phoneList";
         private static final String ARG_INTERACTION_TYPE = "interactionType";
         private static final String ARG_CALL_ORIGIN = "callOrigin";
+        private static final String ARG_SIM_ID = "simId";
 
         private int mInteractionType;
         private ListAdapter mPhonesAdapter;
         private List<PhoneItem> mPhoneList;
         private String mCallOrigin;
+        private int mSimId;
 
         public static void show(FragmentManager fragmentManager,
                 ArrayList<PhoneItem> phoneList, int interactionType,
-                String callOrigin) {
+                String callOrigin, int simId) {
             PhoneDisambiguationDialogFragment fragment = new PhoneDisambiguationDialogFragment();
             Bundle bundle = new Bundle();
             bundle.putParcelableArrayList(ARG_PHONE_LIST, phoneList);
             bundle.putSerializable(ARG_INTERACTION_TYPE, interactionType);
             bundle.putString(ARG_CALL_ORIGIN, callOrigin);
+            bundle.putInt(ARG_SIM_ID, simId);
             fragment.setArguments(bundle);
             fragment.show(fragmentManager, TAG);
         }
@@ -213,6 +221,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
             mPhoneList = getArguments().getParcelableArrayList(ARG_PHONE_LIST);
             mInteractionType = getArguments().getInt(ARG_INTERACTION_TYPE);
             mCallOrigin = getArguments().getString(ARG_CALL_ORIGIN);
+            mSimId = getArguments().getInt(ARG_SIM_ID);
 
             mPhonesAdapter = new PhoneItemAdapter(activity, mPhoneList, mInteractionType);
             final LayoutInflater inflater = activity.getLayoutInflater();
@@ -241,7 +250,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
                 }
 
                 PhoneNumberInteraction.performAction(activity, phoneItem.phoneNumber,
-                        mInteractionType, mCallOrigin);
+                        mInteractionType, mCallOrigin, mSimId);
             } else {
                 dialog.dismiss();
             }
@@ -287,6 +296,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
     private long mContactId = UNKNOWN_CONTACT_ID;
 
     private CursorLoader mLoader;
+    private int mSimId;
 
     /**
      * Constructs a new {@link PhoneNumberInteraction}. The constructor takes in a {@link Context}
@@ -301,20 +311,31 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
     }
 
     private PhoneNumberInteraction(Context context, int interactionType,
+            DialogInterface.OnDismissListener dismissListener, int simId) {
+        this(context, interactionType, dismissListener, null, simId);
+    }
+
+    private PhoneNumberInteraction(Context context, int interactionType,
             DialogInterface.OnDismissListener dismissListener, String callOrigin) {
+        this(context, interactionType, dismissListener, callOrigin, -1);
+    }
+
+    private PhoneNumberInteraction(Context context, int interactionType,
+            DialogInterface.OnDismissListener dismissListener, String callOrigin, int simId) {
         mContext = context;
         mInteractionType = interactionType;
         mDismissListener = dismissListener;
         mCallOrigin = callOrigin;
+        mSimId = simId;
     }
 
     private void performAction(String phoneNumber) {
-        PhoneNumberInteraction.performAction(mContext, phoneNumber, mInteractionType, mCallOrigin);
+        PhoneNumberInteraction.performAction(mContext, phoneNumber, mInteractionType, mCallOrigin, mSimId);
     }
 
     private static void performAction(
             Context context, String phoneNumber, int interactionType,
-            String callOrigin) {
+            String callOrigin, int simId) {
         Intent intent;
         switch (interactionType) {
             case ContactDisplayUtils.INTERACTION_SMS:
@@ -322,7 +343,31 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
                         Intent.ACTION_SENDTO, Uri.fromParts("sms", phoneNumber, null));
                 break;
             default:
-                intent = CallUtil.getCallIntent(phoneNumber, callOrigin);
+                if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                    if (-1 == simId) {
+                        intent = new Intent();
+                        intent.setClassName("com.android.dialer", "com.android.dialer.PhoneSelect");
+                        intent.setData(Uri.fromParts("tel", phoneNumber, null));
+                        intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                    } else {
+                        intent = new Intent(
+                                Intent.ACTION_CALL_PRIVILEGED, Uri.fromParts("tel", phoneNumber, null));
+                        if (SimCardID.ID_ONE.toInt() == simId) {
+                            intent.putExtra("simId", SimCardID.ID_ONE);
+                        } else if (SimCardID.ID_ZERO.toInt() == simId) {
+                            intent.putExtra("simId", SimCardID.ID_ZERO);
+                        } else {
+                            Log.e(TAG, "Error SIM ID");
+                        }
+                    }
+                    if (callOrigin != null) {
+                        intent.putExtra(DialtactsActivity.EXTRA_CALL_ORIGIN, callOrigin);
+                    }
+                }else {
+                    intent = CallUtil.getCallIntent(phoneNumber, callOrigin);
+                }
+
+
                 break;
         }
         context.startActivity(intent);
@@ -459,6 +504,11 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
                 .startInteraction(uri, true);
     }
 
+    public static void startInteractionForPhoneCall(Activity activity, Uri uri, boolean useDefault, SimCardID simCardId) {
+        (new PhoneNumberInteraction(activity, ContactDisplayUtils.INTERACTION_CALL, null, simCardId.toInt()))
+                .startInteraction(uri, true);
+    }
+
     /**
      * Start call action using given contact Uri. If there are multiple candidates for the phone
      * call, dialog is automatically shown and the user is asked to choose one.
@@ -519,6 +569,6 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
     @VisibleForTesting
     /* package */ void showDisambiguationDialog(ArrayList<PhoneItem> phoneList) {
         PhoneDisambiguationDialogFragment.show(((Activity)mContext).getFragmentManager(),
-                phoneList, mInteractionType, mCallOrigin);
+                phoneList, mInteractionType, mCallOrigin, mSimId);
     }
 }

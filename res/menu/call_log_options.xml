@@ -15,6 +15,18 @@
 -->
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
+        android:id="@+id/filter_by_calltype"
+        android:title="@string/menu_filter_by_calltype"
+        android:showAsAction="never"
+        android:orderInCategory="1"/>
+
+    <item
+        android:id="@+id/filter_by_sim"
+        android:title="@string/menu_filter_by_sim"
+        android:showAsAction="never"
+        android:orderInCategory="1"/>
+
+    <item
         android:id="@+id/delete_all"
         android:title="@string/recentCalls_deleteAll"
         android:showAsAction="never"

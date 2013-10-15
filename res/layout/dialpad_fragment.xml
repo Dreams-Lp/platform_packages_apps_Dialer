@@ -74,6 +74,14 @@
                 android:src="@drawable/ic_dial_action_delete" />
         </LinearLayout>
 
+        <ListView
+                android:id="@+id/dial_search"
+                android:layout_width="match_parent"
+                android:layout_height="0px"
+                android:layout_weight="@integer/dialpad_layout_weight_dial_search"
+                android:gravity="center" >
+        </ListView>
+
         <!-- Keypad section -->
         <include layout="@layout/dialpad" />
 
@@ -96,7 +104,7 @@
                 android:src="@drawable/ic_menu_history_lt"/>
             <ImageButton
                 android:id="@+id/dialButton"
-                android:layout_width="0dp"
+                android:layout_width="0px"
                 android:layout_weight="1"
                 android:layout_height="match_parent"
                 android:layout_gravity="center"
@@ -104,6 +112,38 @@
                 android:background="@drawable/btn_call"
                 android:contentDescription="@string/description_dial_button"
                 android:src="@drawable/ic_dial_action_call" />
+            <!--
+            <ImageButton
+                android:id="@+id/dialButtonVT"
+                android:layout_width="0px"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:state_enabled="false"
+                android:background="@drawable/btn_call"
+                android:contentDescription="@string/description_dial_button"
+                android:src="@drawable/ic_dial_action_call_vt" />
+            -->
+            <ImageButton
+                android:id="@+id/dialButtonSIM1"
+                android:layout_width="0px"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:state_enabled="false"
+                android:background="@drawable/btn_call"
+                android:contentDescription="@string/description_dial_button"
+                android:src="@drawable/ic_dial_action_call_1" />
+            <ImageButton
+                android:id="@+id/dialButtonSIM2"
+                android:layout_width="0px"
+                android:layout_weight="1"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:state_enabled="false"
+                android:background="@drawable/btn_call"
+                android:contentDescription="@string/description_dial_button"
+                android:src="@drawable/ic_dial_action_call_2" />
             <ImageButton
                 android:id="@+id/overflow_menu_on_dialpad"
                 android:layout_height="match_parent"

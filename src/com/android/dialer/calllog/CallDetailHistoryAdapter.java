@@ -27,6 +27,8 @@ import android.widget.TextView;
 
 import com.android.dialer.PhoneCallDetails;
 import com.android.dialer.R;
+import com.android.internal.telephony.RILConstants.SimCardID;
+import android.os.SystemProperties;
 
 /**
  * Adapter for a ListView containing history items from the details of a call.
@@ -141,9 +143,21 @@ public class CallDetailHistoryAdapter extends BaseAdapter {
         TextView durationView = (TextView) result.findViewById(R.id.duration);
 
         int callType = details.callTypes[0];
+        int simId = details.simIds[0];
         callTypeIconView.clear();
-        callTypeIconView.add(callType);
-        callTypeTextView.setText(mCallTypeHelper.getCallTypeText(callType));
+        callTypeIconView.add(callType, simId);
+        StringBuilder sb = new StringBuilder();
+        if (simId == SimCardID.ID_ONE.toInt()) {
+            sb.append(mContext.getString(R.string.SIM2));
+        } else if (simId == SimCardID.ID_ZERO.toInt()) {
+            if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                sb.append(mContext.getString(R.string.SIM1));
+            }else {
+                sb.append(mContext.getString(R.string.SIM));
+            }
+        }
+        sb.append(mCallTypeHelper.getCallTypeText(callType));
+        callTypeTextView.setText(sb.toString());
         // Set the date.
         CharSequence dateValue = DateUtils.formatDateRange(mContext, details.date, details.date,
                 DateUtils.FORMAT_SHOW_TIME | DateUtils.FORMAT_SHOW_DATE |

@@ -29,4 +29,15 @@
         android:title="@string/add_wait"
         android:showAsAction="withText"
         android:orderInCategory="1" />
+    <item
+        android:id="@+id/menu_call_settings_dialpad1"
+        android:title="@string/call_settings_sim1"
+        android:showAsAction="withText"
+        android:orderInCategory="1" />
+
+    <item
+        android:id="@+id/menu_call_settings_dialpad2"
+        android:title="@string/call_settings_sim2"
+        android:showAsAction="withText"
+        android:orderInCategory="1" />
 </menu>

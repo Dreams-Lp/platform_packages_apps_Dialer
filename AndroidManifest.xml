@@ -192,6 +192,13 @@
             android:label="@string/custom_list_filter"
             android:theme="@style/ContactListFilterTheme"/>
 
+        <activity android:name="PhoneSelect" android:label="@string/select_phone"
+            android:theme="@android:style/Theme.Dialog">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+
         <!-- vCard related -->
         <activity android:name="com.android.contacts.common.vcard.ImportVCardActivity"
                   android:configChanges="orientation|screenSize|keyboardHidden"

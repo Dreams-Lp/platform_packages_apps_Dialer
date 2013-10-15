@@ -73,8 +73,8 @@ public class PhoneCallDetailsHelper {
         views.callTypeIcons.clear();
         int count = details.callTypes.length;
         for (int index = 0; index < count && index < MAX_CALL_TYPE_ICONS; ++index) {
-            views.callTypeIcons.add(details.callTypes[index]);
-        }
+            views.callTypeIcons.add(details.callTypes[index], details.simIds[index]);
+       }
         views.callTypeIcons.requestLayout();
         views.callTypeIcons.setVisibility(View.VISIBLE);
 

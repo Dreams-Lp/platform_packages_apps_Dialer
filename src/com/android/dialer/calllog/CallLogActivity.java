@@ -40,6 +40,17 @@ import com.android.dialer.DialtactsActivity;
 import com.android.dialer.R;
 import com.android.dialer.calllog.CallLogFragment;
 
+import android.app.Dialog;
+import android.app.DialogFragment;
+import android.os.SystemProperties;
+import android.content.DialogInterface;
+import android.content.DialogInterface.OnClickListener;
+import android.app.AlertDialog;
+import android.telephony.TelephonyManager;
+import android.content.Context;
+import android.net.Uri;
+import android.database.Cursor;
+
 public class CallLogActivity extends Activity {
 
     private ViewPager mViewPager;
@@ -51,6 +62,12 @@ public class CallLogActivity extends Activity {
     private static final int TAB_INDEX_MISSED = 1;
 
     private static final int TAB_INDEX_COUNT = 2;
+
+    private CallLogQueryHandler mCallLogQueryHandler;
+    /** Record current call log filter call type. */
+    private int mCallLogFilterType = -1;
+    /** Record current call log filter sim. */
+    private int mCallLogFilterSIM = -1;
 
     public class ViewPagerAdapter extends FragmentPagerAdapter {
         public ViewPagerAdapter(FragmentManager fm) {
@@ -158,6 +175,12 @@ public class CallLogActivity extends Activity {
         if (mAllCallsFragment != null && itemDeleteAll != null) {
             final CallLogAdapter adapter = mAllCallsFragment.getAdapter();
             itemDeleteAll.setVisible(adapter != null && !adapter.isEmpty());
+            menu.findItem(R.id.filter_by_calltype).setVisible(false);
+            if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                menu.findItem(R.id.filter_by_sim).setVisible(false);
+            }else {
+                menu.findItem(R.id.filter_by_sim).setVisible(false);
+            }
         }
         return true;
     }
@@ -173,7 +196,100 @@ public class CallLogActivity extends Activity {
             case R.id.delete_all:
                 ClearCallLogDialog.show(getFragmentManager());
                 return true;
+            case R.id.filter_by_calltype:
+                FilterCallLogbyCallTypeDialog calltypedialog = new FilterCallLogbyCallTypeDialog();
+                calltypedialog.show(getFragmentManager(), "filterCallLogbySIM");
+                return true;
+
+            case R.id.filter_by_sim:
+                FilterCallLogbySIMDialog simdialog = new FilterCallLogbySIMDialog();
+                simdialog.show(getFragmentManager(), "filterCallLogbySIM");
+                return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    /**
+      * Dialog that filter the call log by Call Type after confirming with the user
+      */
+    public class FilterCallLogbyCallTypeDialog extends DialogFragment {
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            return new AlertDialog.Builder(getActivity())
+            .setTitle(R.string.filterCallLogbyCallTypeConfirmation_title)
+            .setSingleChoiceItems( new String[] { getString(R.string.show_all_types),
+                getString(R.string.show_incoming_calls),
+                getString(R.string.show_outgoing_calls),
+                getString(R.string.show_missed_calls),
+                getString(R.string.menu_show_voicemails_only) },
+                mCallLogFilterType < 0 ? 0: mCallLogFilterType,
+                new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        mCallLogFilterType = which;
+                        if(0 == mCallLogFilterType) {
+                            mCallLogFilterType = -1;
+                        }
+                        mCallLogQueryHandler.fetchCallsbyType(mCallLogFilterType, mCallLogFilterSIM);
+                        dialog.dismiss();
+                    }
+                } )
+            .setNegativeButton(android.R.string.cancel, null)
+            .create();
+        }
+    }
+    /**
+      * Dialog that filter the call log by SIM after confirming with the user
+      */
+    public class FilterCallLogbySIMDialog extends DialogFragment {
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            TelephonyManager tm1 = (TelephonyManager) getActivity().getSystemService(Context.TELEPHONY_SERVICE1);
+            TelephonyManager tm2 = (TelephonyManager) getActivity().getSystemService(Context.TELEPHONY_SERVICE2);
+            String simSelectName1 = getEnabledSimSelectName(tm1.getSubscriberId());
+            if (simSelectName1.length() == 0) {  // no customized name, use operator name
+                simSelectName1 = tm1.getNetworkOperatorName();
+            }
+            if (simSelectName1.length() == 0) {
+                simSelectName1 = "SIM 1";  // neither customized name nor operator name found
+            }
+            String sim1_display_name = simSelectName1+ "\n" + tm1.getLine1Number();
+            String simSelectName2 = getEnabledSimSelectName(tm2.getSubscriberId());
+            if (simSelectName2.length() == 0) {  // no customized name, use operator name
+                simSelectName2 = tm2.getNetworkOperatorName();
+            }
+            if (simSelectName2.length() == 0) {
+                simSelectName2 = "SIM 2";  // neither customized name nor operator name found
+            }
+            String sim2_display_name = simSelectName2+ "\n" + tm2.getLine1Number();
+            return new AlertDialog.Builder(getActivity())
+            .setTitle(R.string.filterCallLogbySIMConfirmation_title)
+            .setSingleChoiceItems( new String[] { getString(R.string.show_all_sim_calls),
+                sim1_display_name,
+                sim2_display_name },
+                mCallLogFilterSIM < 0 ? 0: mCallLogFilterSIM+1,
+                new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        mCallLogFilterSIM = which - 1;
+                        mCallLogQueryHandler.fetchCallsbyType(mCallLogFilterType, mCallLogFilterSIM);
+                        dialog.dismiss();
+                    }
+                } )
+            .setNegativeButton(android.R.string.cancel, null)/*.show()*/
+            .create();
+        }
+    
+        private String getEnabledSimSelectName(String imsi) {
+            String simSelectName = "";
+            Uri SIM_NAMES_CONTENT_URI = Uri.parse("content://com.broadcom.simname/simnames");
+            String[] PROJECTION = {"_id", "sim_imsi", "sim_name", "sim_name_enabled"};
+            Cursor cursor = getActivity().getContentResolver().query(SIM_NAMES_CONTENT_URI, PROJECTION, "sim_imsi=" + imsi + " AND sim_name_enabled=1", null,"_id DESC");
+            if (null != cursor) {
+                if (cursor.moveToFirst()){
+                    simSelectName = cursor.getString(2);
+                }
+                cursor.close();
+            }
+            return simSelectName;
+        }
     }
 }

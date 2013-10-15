@@ -76,6 +76,9 @@ import com.android.dialer.voicemail.VoicemailStatusHelperImpl;
 
 import java.util.List;
 
+import com.android.internal.telephony.RILConstants.SimCardID;
+import android.os.SystemProperties;
+
 /**
  * Displays the details of a specific call log entry.
  * <p>
@@ -218,6 +221,7 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
         CallLog.Calls.COUNTRY_ISO,
         CallLog.Calls.GEOCODED_LOCATION,
         CallLog.Calls.NUMBER_PRESENTATION,
+        CallLog.Calls.SIM_ID
     };
 
     static final int DATE_COLUMN_INDEX = 0;
@@ -227,6 +231,7 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
     static final int COUNTRY_ISO_COLUMN_INDEX = 4;
     static final int GEOCODED_LOCATION_COLUMN_INDEX = 5;
     static final int NUMBER_PRESENTATION_COLUMN_INDEX = 6;
+    static final int SIM_ID_COLUMN_INDEX = 7;
 
     private final View.OnClickListener mPrimaryActionListener = new View.OnClickListener() {
         @Override
@@ -411,12 +416,25 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
             case KeyEvent.KEYCODE_CALL: {
                 // Make sure phone isn't already busy before starting direct call
                 TelephonyManager tm = (TelephonyManager)
-                        getSystemService(Context.TELEPHONY_SERVICE);
-                if (tm.getCallState() == TelephonyManager.CALL_STATE_IDLE) {
-                    startActivity(CallUtil.getCallIntent(
-                            Uri.fromParts(CallUtil.SCHEME_TEL, mNumber, null)));
-                    return true;
+                        getSystemService(Context.TELEPHONY_SERVICE1);
+                if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                    TelephonyManager tm2 = (TelephonyManager)
+                            getSystemService(Context.TELEPHONY_SERVICE2);
+                    if ((tm.getCallState() == TelephonyManager.CALL_STATE_IDLE) && (tm2.getCallState() == TelephonyManager.CALL_STATE_IDLE)) {
+                        Intent callIntent = new Intent();
+                        callIntent.setClassName("com.android.dialer", "com.android.dialer.PhoneSelect");
+                        callIntent.setData(Uri.fromParts("tel", mNumber, null));
+                        callIntent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                        callIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(callIntent);
+                    }
+                }else {
+                    if (tm.getCallState() == TelephonyManager.CALL_STATE_IDLE) {
+                        startActivity(CallUtil.getCallIntent(
+                                Uri.fromParts(CallUtil.SCHEME_TEL, mNumber, null)));
+                        }
                 }
+                return true;
             }
         }
 
@@ -552,11 +570,26 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
                                     firstDetails.numberPresentation,
                                     firstDetails.formattedNumber);
 
-                    ViewEntry entry = new ViewEntry(
-                            getString(R.string.menu_callNumber,
-                                    forceLeftToRight(displayNumber)),
-                                    CallUtil.getCallIntent(mNumber),
-                                    getString(R.string.description_call, nameOrNumber));
+                    ViewEntry entry;
+
+                    // Launch SelectPhone activity
+                     if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                        Intent intent = new Intent();
+                        intent.setClassName("com.android.dialer", "com.android.dialer.PhoneSelect");
+                        intent.setData(CallUtil.getCallUri(mNumber));
+                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        entry = new ViewEntry(
+                                                    getString(R.string.menu_callNumber,
+                                                            forceLeftToRight(displayNumber)),
+                                                            intent,
+                                                            getString(R.string.description_call, nameOrNumber));
+                    }else {
+                        entry = new ViewEntry(
+                                                    getString(R.string.menu_callNumber,
+                                                            forceLeftToRight(displayNumber)),
+                                                            CallUtil.getCallIntent(mNumber),
+                                                            getString(R.string.description_call, nameOrNumber));
+                    }
 
                     // Only show a label if the number is shown and it is not a SIP address.
                     if (!TextUtils.isEmpty(firstDetails.name)
@@ -670,6 +703,7 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
             final int callType = callCursor.getInt(CALL_TYPE_COLUMN_INDEX);
             String countryIso = callCursor.getString(COUNTRY_ISO_COLUMN_INDEX);
             final String geocode = callCursor.getString(GEOCODED_LOCATION_COLUMN_INDEX);
+            int simId = callCursor.getInt(SIM_ID_COLUMN_INDEX);
 
             if (TextUtils.isEmpty(countryIso)) {
                 countryIso = mDefaultCountryIso;
@@ -708,7 +742,7 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
             return new PhoneCallDetails(number, numberPresentation,
                     formattedNumber, countryIso, geocode,
                     new int[]{ callType }, date, duration,
-                    nameText, numberType, numberLabel, lookupUri, photoUri);
+                    nameText, numberType, numberLabel, lookupUri, photoUri, new int[]{ simId });
         } finally {
             if (callCursor != null) {
                 callCursor.close();

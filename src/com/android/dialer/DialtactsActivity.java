@@ -75,6 +75,11 @@ import com.android.dialer.list.SmartDialSearchFragment;
 import com.android.dialerbind.DatabaseHelperManager;
 import com.android.internal.telephony.ITelephony;
 
+import android.telephony.TelephonyManager;
+import com.android.internal.telephony.RILConstants.SimCardID;
+import com.android.contacts.common.SimContactsReadyHelper;
+import android.os.SystemProperties;
+
 import java.util.ArrayList;
 
 /**
@@ -95,8 +100,14 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
     private static final String PHONE_PACKAGE = "com.android.phone";
     private static final String CALL_SETTINGS_CLASS_NAME =
             "com.android.phone.CallFeaturesSetting";
+
+    /**
+     * Copied from PhoneApp. See comments in Phone app for more detail.
+     */
+    public static final String EXTRA_CALL_ORIGIN = "com.android.phone.CALL_ORIGIN";
+
     /** @see #getCallOrigin() */
-    private static final String CALL_ORIGIN_DIALTACTS =
+    public static final String CALL_ORIGIN_DIALTACTS =
             "com.android.dialer.DialtactsActivity";
 
     private static final String KEY_IN_REGULAR_SEARCH_UI = "in_regular_search_ui";
@@ -399,7 +410,13 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
                 }
                 return true;
             case R.id.menu_call_settings:
-                handleMenuSettings();
+                handleMenuSettings(SimCardID.ID_ZERO);
+                return true;
+            case R.id.menu_call_settings1:
+                handleMenuSettings(SimCardID.ID_ZERO);
+                return true;
+            case R.id.menu_call_settings2:
+                handleMenuSettings(SimCardID.ID_ONE);
                 return true;
             case R.id.menu_all_contacts:
                 onShowAllContacts();
@@ -408,12 +425,13 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         return false;
     }
 
-    protected void handleMenuSettings() {
-        openTelephonySetting(this);
+    protected void handleMenuSettings(SimCardID simId) {
+        openTelephonySetting(this, simId);
     }
 
-    public static void openTelephonySetting(Activity activity) {
-        final Intent settingsIntent = getCallSettingsIntent();
+    public static void openTelephonySetting(Activity activity, SimCardID simId) {
+        //final Intent settingsIntent = getCallSettingsIntent();
+        final Intent settingsIntent = getCallSettingsIntent(simId);
         activity.startActivity(settingsIntent);
     }
 
@@ -610,6 +628,26 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
             mOverflowMenu.inflate(R.menu.dialtacts_options);
             mOverflowMenu.setOnMenuItemClickListener(this);
             mMenuButton.setOnTouchListener(mOverflowMenu.getDragToOpenListener());
+            final MenuItem callSettingsMenuItem = menu.findItem(R.id.menu_call_settings);
+            final MenuItem callSettingsMenuItem1 = menu.findItem(R.id.menu_call_settings1);
+            final MenuItem callSettingsMenuItem2 = menu.findItem(R.id.menu_call_settings2);
+            if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                if (TelephonyManager.getDefault(SimCardID.ID_ZERO).hasIccCard()) {
+                    callSettingsMenuItem1.setVisible(true);
+                } else {
+                    callSettingsMenuItem1.setVisible(false);
+                }
+                if (TelephonyManager.getDefault(SimCardID.ID_ONE).hasIccCard()) {
+                    callSettingsMenuItem2.setVisible(true);
+                } else {
+                    callSettingsMenuItem2.setVisible(false);
+                }
+                callSettingsMenuItem.setVisible(false);
+            }else {
+                callSettingsMenuItem.setVisible(true);
+                callSettingsMenuItem1.setVisible(false);
+                callSettingsMenuItem2.setVisible(false);
+            }
         }
 
         mCallHistoryButton = findViewById(R.id.call_history_button);
@@ -651,7 +689,7 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
             final boolean callKey = intent.getBooleanExtra("call_key", false);
 
             try {
-                ITelephony phone = ITelephony.Stub.asInterface(ServiceManager.checkService("phone"));
+                ITelephony phone = ITelephony.Stub.asInterface(ServiceManager.checkService("phone1"));
                 if (callKey && phone != null && phone.showCallScreen()) {
                     return true;
                 }
@@ -873,10 +911,12 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
     }
 
     /** Returns an Intent to launch Call Settings screen */
-    public static Intent getCallSettingsIntent() {
+    //public static Intent getCallSettingsIntent() {
+    public static Intent getCallSettingsIntent(SimCardID simId) {
         final Intent intent = new Intent(Intent.ACTION_MAIN);
         intent.setClassName(PHONE_PACKAGE, CALL_SETTINGS_CLASS_NAME);
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        intent.setData(Uri.parse(String.valueOf(simId.toInt())));
         return intent;
     }
 

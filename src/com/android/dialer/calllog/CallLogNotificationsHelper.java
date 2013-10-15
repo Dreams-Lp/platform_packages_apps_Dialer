@@ -34,7 +34,7 @@ public class CallLogNotificationsHelper {
     public static void removeMissedCallNotifications() {
         try {
             ITelephony telephony =
-                    ITelephony.Stub.asInterface(ServiceManager.getService("phone"));
+                    ITelephony.Stub.asInterface(ServiceManager.getService("phone1"));
             if (telephony != null) {
                 telephony.cancelMissedCallsNotification();
             } else {

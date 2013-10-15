@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_horizontal"
+        android:layout_weight="1">
+
+        <Button
+            android:id="@+id/sim_chooser_card_1"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.5"
+            android:drawableTop="@android:drawable/stat_sys_phone_call"
+            android:drawablePadding="2dip"
+            android:text="@string/sim_chooser_sim_one"/>
+
+        <Button
+            android:id="@+id/sim_chooser_card_2"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.5"
+            android:drawableTop="@android:drawable/stat_sys_phone_call"
+            android:drawablePadding="2dip"
+            android:text="@string/sim_chooser_sim_two"/>
+</LinearLayout>

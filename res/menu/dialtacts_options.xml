@@ -30,4 +30,14 @@
         android:id="@+id/menu_call_settings"
         android:title="@string/call_settings"
         android:orderInCategory="2" />
+    <item
+        android:id="@+id/menu_call_settings1"
+        android:title="@string/call_settings_sim1"
+        android:showAsAction="withText"
+        android:orderInCategory="2" />
+    <item
+        android:id="@+id/menu_call_settings2"
+        android:title="@string/call_settings_sim2"
+        android:showAsAction="withText"
+        android:orderInCategory="2" />
 </menu>

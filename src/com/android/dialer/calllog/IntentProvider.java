@@ -26,6 +26,7 @@ import android.util.Log;
 
 import com.android.contacts.common.CallUtil;
 import com.android.dialer.CallDetailActivity;
+import android.os.SystemProperties;
 
 /**
  * Used to create an intent to attach to an action in the call log.
@@ -42,7 +43,14 @@ public abstract class IntentProvider {
         return new IntentProvider() {
             @Override
             public Intent getIntent(Context context) {
-                return CallUtil.getCallIntent(number);
+                     if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                        Intent intent = CallUtil.getCallIntent(number);
+                        intent.setClassName("com.android.dialer", "com.android.dialer.PhoneSelect");
+                        intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                        return intent;
+                    }else {
+                        return CallUtil.getCallIntent(number);
+                    }
             }
         };
     }

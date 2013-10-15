@@ -50,6 +50,8 @@ import com.android.dialerbind.ObjectFactory;
 import com.android.internal.telephony.ITelephony;
 
 import java.util.List;
+import android.app.FragmentManager;
+import android.os.SystemProperties;
 
 /**
  * Displays a list of call log entries. To filter for a particular kind of call
@@ -68,8 +70,18 @@ public class CallLogFragment extends ListFragment
     private CallLogQueryHandler mCallLogQueryHandler;
     private boolean mScrollToTop;
 
+    private boolean mShowOptionsMenu = true;
     /** Whether there is at least one voicemail source installed. */
-    private boolean mVoicemailSourcesAvailable = false;
+    private boolean mVoicemailSourcesAvailable = true;
+    /** Record current call log filter call type. */
+    private int mCallLogFilterType = -1;
+    /** Record current call log filter sim. */
+    private int mCallLogFilterSIM = -1;
+
+    private TextView mOperatorName1, mOperatorName2;
+    private static final Uri SIM_NAMES_CONTENT_URI = Uri.parse("content://com.broadcom.simname/simnames");
+    private static final String[] PROJECTION = {"_id", "sim_imsi", "sim_name", "sim_name_enabled"};
+    private TelephonyManager tm1, tm2;
 
     private VoicemailStatusHelper mVoicemailStatusHelper;
     private View mStatusMessageView;
@@ -323,12 +335,12 @@ public class CallLogFragment extends ListFragment
 
     @Override
     public void fetchCalls() {
-        mCallLogQueryHandler.fetchCalls(mCallTypeFilter);
+        mCallLogQueryHandler.fetchCallsbyType(mCallLogFilterType, mCallLogFilterSIM);
     }
 
     public void startCallsQuery() {
         mAdapter.setLoading(true);
-        mCallLogQueryHandler.fetchCalls(mCallTypeFilter);
+        mCallLogQueryHandler.fetchCallsbyType(mCallLogFilterType, mCallLogFilterSIM);
     }
 
     private void startVoicemailStatusQuery() {
@@ -376,6 +388,8 @@ public class CallLogFragment extends ListFragment
             if (PhoneNumberUtils.isUriNumber(number)) {
                 intent = CallUtil.getCallIntent(
                         Uri.fromParts(CallUtil.SCHEME_SIP, number, null));
+                intent.setFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
             } else {
                 // We're calling a regular PSTN phone number.
                 // Construct a tel: URI, but do some other possible cleanup first.
@@ -387,11 +401,20 @@ public class CallLogFragment extends ListFragment
                     String countryIso = cursor.getString(CallLogQuery.COUNTRY_ISO);
                     number = mAdapter.getBetterNumberFromContacts(number, countryIso);
                 }
-                intent = CallUtil.getCallIntent(
-                        Uri.fromParts(CallUtil.SCHEME_TEL, number, null));
+
+                 if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                    intent = new Intent();
+                    intent.setClassName("com.android.dialer", "com.android.dialer.PhoneSelect");
+                    intent.setData(Uri.fromParts("tel", number, null));
+                    intent.setFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                 }else {
+                    intent = CallUtil.getCallIntent(
+                            Uri.fromParts(CallUtil.SCHEME_TEL, number, null));
+                    intent.setFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                 }
             }
-            intent.setFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+
             startActivity(intent);
         }
     }

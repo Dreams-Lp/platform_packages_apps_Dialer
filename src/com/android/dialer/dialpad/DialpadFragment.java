@@ -95,6 +95,34 @@ import com.google.common.annotations.VisibleForTesting;
 
 import java.util.HashSet;
 
+import android.widget.Toast;
+import com.android.internal.telephony.RILConstants.SimCardID;
+import android.os.SystemClock;
+import com.android.internal.telephony.Phone;
+import com.android.internal.telephony.TelephonyProperties;
+
+import android.view.MotionEvent;
+import android.view.View.OnTouchListener;
+
+import com.android.contacts.common.list.ContactListItemView;
+import com.android.contacts.common.list.DirectoryListLoader;
+import com.android.contacts.common.list.DirectoryPartition;
+//import com.android.contacts.list.LegacyPhoneNumberListAdapter;
+import com.android.contacts.common.list.PhoneNumberListAdapter;
+import com.android.contacts.common.preference.ContactsPreferences;
+
+import android.widget.AbsListView.OnScrollListener;
+import android.app.LoaderManager;
+import android.app.LoaderManager.LoaderCallbacks;
+import android.content.CursorLoader;
+import android.content.Loader;
+import android.os.Handler;
+import android.os.Message;
+import android.provider.ContactsContract.Directory;
+import com.android.common.widget.CompositeCursorAdapter.Partition;
+import android.widget.AbsListView;
+import com.android.contacts.common.ContactPhotoManager;
+
 /**
  * Fragment that displays a twelve-key phone dialpad.
  */
@@ -103,7 +131,10 @@ public class DialpadFragment extends Fragment
         View.OnLongClickListener, View.OnKeyListener,
         AdapterView.OnItemClickListener, TextWatcher,
         PopupMenu.OnMenuItemClickListener,
-        DialpadKeyButton.OnPressedListener {
+        DialpadKeyButton.OnPressedListener,
+        OnTouchListener,
+        OnScrollListener,
+        LoaderCallbacks<Cursor> {
     private static final String TAG = DialpadFragment.class.getSimpleName();
 
     public interface OnDialpadFragmentStartedListener {
@@ -188,6 +219,10 @@ public class DialpadFragment extends Fragment
     /** Stream type used to play the DTMF tones off call, and mapped to the volume control keys */
     private static final int DIAL_TONE_STREAM_TYPE = AudioManager.STREAM_DTMF;
 
+    public interface Listener {
+        public void onSearchButtonPressed(String searchText);
+    }
+
     private ContactsPreferences mContactsPrefs;
 
     private OnDialpadQueryChangedListener mDialpadQueryListener;
@@ -213,8 +248,41 @@ public class DialpadFragment extends Fragment
      */
     private final HashSet<View> mPressedDialpadKeys = new HashSet<View>(12);
 
+    private Listener mListener;
+
     private View mDialButtonContainer;
     private View mDialButton;
+    private View mDialButtonVT;
+    private View mDialButtonSim1;
+    private View mDialButtonSim2;
+    private static final int STATUS_NOT_LOADED = 0;
+    private static final int STATUS_LOADING = 1;
+    private static final int STATUS_LOADED = 2;
+
+    private static final int DIRECTORY_LOADER_ID = -1;
+
+    private int mDirectoryListStatus = STATUS_NOT_LOADED;
+    private static final int DEFAULT_DIRECTORY_RESULT_LIMIT = 20;
+    private static final int DIRECTORY_SEARCH_MESSAGE = 1;
+    private static final String DIRECTORY_ID_ARG_KEY = "directoryId";
+    private static final int DIRECTORY_SEARCH_DELAY_MILLIS = 300;
+
+    private ListView mDialSearchList;
+    private ContactPhotoManager mPhotoManager;
+    private PhoneNumberListAdapter mAdapter;
+    //private ContactsPreferences mContactsPrefs;
+    private int mDisplayOrder;
+    private int mSortOrder;
+    private boolean mForceLoad;
+
+    /**
+     * Indicates whether we are doing the initial complete load of data (false) or
+     * a refresh caused by a change notification (true)
+     */
+    private boolean mLoadPriorityDirectoriesOnly;
+    private String mQueryString;
+    private boolean mSearchMode;
+    private int mDirectorySearchMode = DirectoryListLoader.SEARCH_MODE_NONE;
     private ListView mDialpadChooser;
     private DialpadChooserAdapter mDialpadChooserAdapter;
 
@@ -223,6 +291,16 @@ public class DialpadFragment extends Fragment
      */
     private String mProhibitedPhoneNumberRegexp;
 
+    //BCM215x SIM VM status flag
+    private static final int BCM_SIM_VM_NONE = 0;
+    private static final int BCM_SIM_VM_1 = 1;
+    private static final int BCM_SIM_VM_2 = 2;
+    private static final int BCM_SIM_VM_BOTH = 3;
+    private static final int BCM_AIRPLANE_MODE_ON_WAITTIME = 3500;
+    private static final String BCM_VM1PWR_SAVING_PATH = "gsm.vm1pwrsaving";
+    private static final String BCM_VM2PWR_SAVING_PATH = "gsm.vm2pwrsaving";
+    private static final String BCM_VM1PWR_SAVING_PRE_PATH = "gsm.vm1pwrsaving_pre";
+    private static final String BCM_VM2PWR_SAVING_PRE_PATH = "gsm.vm2pwrsaving_pre";
 
     // Last number dialed, retrieved asynchronously from the call DB
     // in onCreate. This number is displayed when the user hits the
@@ -253,6 +331,8 @@ public class DialpadFragment extends Fragment
             = "com.android.phone.extra.SEND_EMPTY_FLASH";
 
     private String mCurrentCountryIso;
+
+    private static final int REQUEST_EXIT_NOTIFY = 8001;
 
     private final PhoneStateListener mPhoneStateListener = new PhoneStateListener() {
         /**
@@ -296,9 +376,19 @@ public class DialpadFragment extends Fragment
      * Return an Intent for launching voicemail screen.
      */
     private static Intent getVoicemailIntent() {
-        final Intent intent = new Intent(Intent.ACTION_CALL_PRIVILEGED,
-                Uri.fromParts("voicemail", "", null));
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        Intent intent;
+        if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+            intent = new Intent();
+            intent.setClassName("com.android.contacts", "com.android.contacts.PhoneSelect");
+            intent.setData(Uri.fromParts("voicemail", "", null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        }else {
+            intent = new Intent(Intent.ACTION_CALL_PRIVILEGED,
+                                             Uri.fromParts("voicemail", "", null));
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+
         return intent;
     }
 
@@ -333,6 +423,9 @@ public class DialpadFragment extends Fragment
                 SpecialCharSequenceMgr.handleChars(getActivity(), input.toString(), mDigits)) {
             // A special sequence was entered, clear the digits
             mDigits.getText().clear();
+        } else if (SpecialCharSequenceMgr.handleSimRelatedChars(getActivity(), input.toString(), mDigits)) {
+            // A special sim related sequence was entered, clear the digits
+            mDigits.getText().clear();
         }
 
         if (isDigitsEmpty()) {
@@ -344,6 +437,10 @@ public class DialpadFragment extends Fragment
             mDialpadQueryListener.onDialpadQueryChanged(mDigits.getText().toString());
         }
         updateDialAndDeleteButtonEnabledState();
+
+        if (null != mDialSearchList) {
+            setQueryString(mDigits.getText().toString(), true);
+        }
     }
 
     @Override
@@ -366,6 +463,7 @@ public class DialpadFragment extends Fragment
         if (state != null) {
             mDigitsFilledByIntent = state.getBoolean(PREF_DIGITS_FILLED_BY_INTENT);
         }
+        mContactsPrefs = new ContactsPreferences(getActivity());
     }
 
     @Override
@@ -414,14 +512,42 @@ public class DialpadFragment extends Fragment
         if (oneButton != null) {
             setupKeypad(fragmentView);
         }
-
         mDialButton = fragmentView.findViewById(R.id.dialButton);
+        //mDialButtonVT = fragmentView.findViewById(R.id.dialButtonVT);
+        mDialButtonSim1 = fragmentView.findViewById(R.id.dialButtonSIM1);
+        mDialButtonSim2 = fragmentView.findViewById(R.id.dialButtonSIM2);
         if (r.getBoolean(R.bool.config_show_onscreen_dial_button)) {
-            mDialButton.setOnClickListener(this);
-            mDialButton.setOnLongClickListener(this);
+
+            if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                mDialButtonSim1.setOnLongClickListener(this);
+                mDialButtonSim1.setOnClickListener(this);
+                mDialButtonSim2.setOnLongClickListener(this);
+                mDialButtonSim2.setOnClickListener(this);
+                mDialButton.setVisibility(View.GONE); // It's VISIBLE by default
+                mDialButton = null;
+            }else {
+                mDialButton.setOnClickListener(this);
+                mDialButton.setOnLongClickListener(this);
+                mDialButtonSim1.setVisibility(View.GONE); // It's VISIBLE by default
+                mDialButtonSim1 = null;
+                mDialButtonSim2.setVisibility(View.GONE); // It's VISIBLE by default
+                mDialButtonSim2 = null;
+            }
         } else {
             mDialButton.setVisibility(View.GONE); // It's VISIBLE by default
             mDialButton = null;
+            mDialButtonVT.setVisibility(View.GONE); // It's VISIBLE by default
+            mDialButtonVT = null;
+            mDialButtonSim1.setVisibility(View.GONE); // It's VISIBLE by default
+            mDialButtonSim1 = null;
+            mDialButtonSim2.setVisibility(View.GONE); // It's VISIBLE by default
+            mDialButtonSim2 = null;
+        }
+        mDialSearchList = (ListView) fragmentView.findViewById(R.id.dial_search);
+        int dial_search_weight = getActivity().getResources().getInteger(R.integer.dialpad_layout_weight_dial_search);
+        if (0 >= dial_search_weight) {
+            mDialSearchList.setVisibility(View.GONE);
+            mDialSearchList = null;
         }
 
         mDelete = fragmentView.findViewById(R.id.deleteButton);
@@ -454,6 +580,10 @@ public class DialpadFragment extends Fragment
         // Set up the "dialpad chooser" UI; see showDialpadChooser().
         mDialpadChooser = (ListView) fragmentView.findViewById(R.id.dialpadChooser);
         mDialpadChooser.setOnItemClickListener(this);
+
+        if (null != mDialSearchList) {
+            configDialSearchList();
+        }
 
         return fragmentView;
     }
@@ -782,18 +912,11 @@ public class DialpadFragment extends Fragment
         // TODO: I wonder if we should not check if the AsyncTask that
         // lookup the last dialed number has completed.
         mLastNumberDialed = EMPTY_NUMBER;  // Since we are going to query again, free stale number.
+        if (null != mDialSearchList) {
+            removePendingDirectorySearchRequests();
+        }
 
         SpecialCharSequenceMgr.cleanup();
-    }
-
-    @Override
-    public void onStop() {
-        super.onStop();
-
-        if (mClearDigitsOnStop) {
-            mClearDigitsOnStop = false;
-            clearDialpad();
-        }
     }
 
     @Override
@@ -804,6 +927,41 @@ public class DialpadFragment extends Fragment
 
     private void setupMenuItems(Menu menu) {
         final MenuItem addToContactMenuItem = menu.findItem(R.id.menu_add_contacts);
+        final MenuItem callSettingsMenuItem1 = menu.findItem(R.id.menu_call_settings_dialpad1);
+        final MenuItem callSettingsMenuItem2 = menu.findItem(R.id.menu_call_settings_dialpad2);
+
+        // Check if all the menu items are inflated correctly. As a shortcut, we assume all menu
+        // items are ready if the first item is non-null.
+        if (callSettingsMenuItem1 == null) {
+            return;
+        }
+
+        final Activity activity = getActivity();
+        if (activity != null && ViewConfiguration.get(activity).hasPermanentMenuKey()) {
+            // Call settings should be available via its parent Activity.
+            callSettingsMenuItem1.setVisible(false);
+            callSettingsMenuItem2.setVisible(false);
+        } else {
+            if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                if (TelephonyManager.getDefault(SimCardID.ID_ZERO).hasIccCard()) {
+                    callSettingsMenuItem1.setVisible(true);
+                    callSettingsMenuItem1.setIntent(DialtactsActivity.getCallSettingsIntent(SimCardID.ID_ZERO));
+                } else {
+                    callSettingsMenuItem1.setVisible(false);
+                }
+
+                if (TelephonyManager.getDefault(SimCardID.ID_ONE).hasIccCard()) {
+                    callSettingsMenuItem2.setVisible(true);
+                    callSettingsMenuItem2.setIntent(DialtactsActivity.getCallSettingsIntent(SimCardID.ID_ONE));
+                } else {
+                    callSettingsMenuItem2.setVisible(false);
+                }
+            }else {
+                callSettingsMenuItem1.setVisible(true);
+                callSettingsMenuItem1.setIntent(DialtactsActivity.getCallSettingsIntent(SimCardID.ID_ZERO));
+                callSettingsMenuItem2.setVisible(false);
+            }
+        }
 
         // We show "add to contacts" menu only when the user is
         // seeing usual dialpad and has typed at least one digit.
@@ -977,9 +1135,16 @@ public class DialpadFragment extends Fragment
                 keyPressed(KeyEvent.KEYCODE_DEL);
                 return;
             }
-            case R.id.dialButton: {
+            case R.id.dialButton:
+            case R.id.dialButtonSIM1: {
                 mHaptic.vibrate();  // Vibrate here too, just like we do for the regular keys
-                dialButtonPressed();
+                dialButtonPressed(SimCardID.ID_ZERO, false);
+                return;
+            }
+
+            case R.id.dialButtonSIM2: {
+                mHaptic.vibrate();  // Vibrate here too, just like we do for the regular keys
+                dialButtonPressed(SimCardID.ID_ONE, false);
                 return;
             }
             case R.id.digits: {
@@ -1083,9 +1248,22 @@ public class DialpadFragment extends Fragment
         }
     }
 
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        switch (requestCode) {
+            case REQUEST_EXIT_NOTIFY: {
+                if (resultCode == Activity.RESULT_OK){
+                    //clear the input and finish
+                    mClearDigitsOnStop = true;
+                    getActivity().finish();
+                }
+                break;
+            }
+        }
+    }
+
     public void callVoicemail() {
-        startActivity(getVoicemailIntent());
-        hideAndClearDialpad();
+        startActivityForResult(getVoicemailIntent(), REQUEST_EXIT_NOTIFY);
     }
 
     private void hideAndClearDialpad() {
@@ -1139,6 +1317,182 @@ public class DialpadFragment extends Fragment
         }
     }
 
+    private boolean isSimStateReady(SimCardID simId) {
+        return (TelephonyManager.SIM_STATE_READY == TelephonyManager.getDefault(simId).getSimState());
+    }
+
+    private boolean isRegisterdToNetwork(SimCardID simId) {
+        return (0 < TelephonyManager.getDefault(simId).getNetworkOperator().length());
+    }
+
+    private int getCurrentVMStatus() {
+        int vmOneStatus = SystemProperties.getInt(BCM_VM1PWR_SAVING_PATH, 0);
+        int vmTwoStatus = SystemProperties.getInt(BCM_VM2PWR_SAVING_PATH, 0);
+        final int settingSIMOneStatus = Settings.System.getInt(getActivity().getContentResolver(), Settings.Global.PHONE1_ON, 0);
+        final int settingSIMTwoStatus = Settings.System.getInt(getActivity().getContentResolver(), Settings.Global.PHONE2_ON, 0);
+        int rs = BCM_SIM_VM_NONE;
+
+        if ((1 == settingSIMOneStatus) && (1 == settingSIMTwoStatus)) {
+            if (0 != Settings.System.getInt(getActivity().getContentResolver(), Settings.System.AIRPLANE_MODE_ON, 0)) {
+                vmOneStatus = SystemProperties.getInt(BCM_VM1PWR_SAVING_PRE_PATH, -1);
+                vmTwoStatus = SystemProperties.getInt(BCM_VM2PWR_SAVING_PRE_PATH, -1);
+                if (-1 == vmOneStatus || -1 == vmTwoStatus) { // Turn off flymode in case it's not set by user (flymode already when boot)
+                    // Change the system setting
+                    Settings.System.putInt(getActivity().getContentResolver(), Settings.System.AIRPLANE_MODE_ON, 0);
+                    // Post the intent
+                    Intent intent = new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+                    intent.putExtra("state", false);
+                    getActivity().sendBroadcast(intent);
+                    SystemClock.sleep(BCM_AIRPLANE_MODE_ON_WAITTIME); // allow some time for SIM to set RF power
+                    return getCurrentVMStatus();
+                }
+            }
+
+            if ((0 == vmOneStatus) && (0 == vmTwoStatus)) {
+                rs = BCM_SIM_VM_BOTH;
+            } else if (0 == vmOneStatus) {
+                rs = BCM_SIM_VM_1;
+            } else if (0 == vmTwoStatus) {
+                rs = BCM_SIM_VM_2;
+            }
+        } else if (1 == settingSIMTwoStatus) {
+            rs = BCM_SIM_VM_2;
+        } else  rs = BCM_SIM_VM_1;
+
+        return rs;
+    }
+
+    private SimCardID getSimCardIdForVT() {
+        String propNetworkTypeSim1 =
+                SystemProperties.get(TelephonyProperties.PROPERTY_NETWORK_TYPE,
+                String.valueOf(Phone.NT_MODE_WCDMA_PREF));
+        String propNetworkTypeSim2 =
+                SystemProperties.get(TelephonyProperties.PROPERTY_NETWORK_TYPE + "_"
+                + String.valueOf(SimCardID.ID_ONE.toInt()), String.valueOf(Phone.NT_MODE_GSM_ONLY));
+
+        if ((propNetworkTypeSim1.equals(String.valueOf(Phone.NT_MODE_WCDMA_PREF))
+                || propNetworkTypeSim1.equals(String.valueOf(Phone.NT_MODE_WCDMA_ONLY)))
+                && propNetworkTypeSim2.equals(String.valueOf(Phone.NT_MODE_GSM_ONLY))) {
+            // SIM1 3G prefer or 3G only
+            // SIM2 2G only
+            return SimCardID.ID_ZERO;
+        } else if (propNetworkTypeSim1.equals(String.valueOf(Phone.NT_MODE_GSM_ONLY))
+                && (propNetworkTypeSim2.equals(String.valueOf(Phone.NT_MODE_WCDMA_PREF))
+                || propNetworkTypeSim2.equals(String.valueOf(Phone.NT_MODE_WCDMA_ONLY)))) {
+            // SIM1 2G only
+            // SIM2 3G prefer or 3G only
+            return SimCardID.ID_ONE;
+        } else if (propNetworkTypeSim1.equals(String.valueOf(Phone.NT_MODE_GSM_ONLY))
+                && propNetworkTypeSim2.equals(String.valueOf(Phone.NT_MODE_GSM_ONLY))) {
+            // SIM1 2G only
+            // SIM2 2G only
+            Log.d(TAG, "getSimCardIdForVT(): SIM1 is 2G and SIM2 is 2G");
+            return null;
+        } else if ((propNetworkTypeSim1.equals(String.valueOf(Phone.NT_MODE_WCDMA_PREF))
+                || propNetworkTypeSim1.equals(String.valueOf(Phone.NT_MODE_WCDMA_ONLY)))
+                && (propNetworkTypeSim2.equals(String.valueOf(Phone.NT_MODE_WCDMA_PREF))
+                || propNetworkTypeSim2.equals(String.valueOf(Phone.NT_MODE_WCDMA_ONLY)))) {
+            // SIM1 3G prefer or 3G only
+            // SIM2 3G prefer or 3G only
+            // both 3G property enabled
+            Log.d(TAG, "getSimCardIdForVT(): SIM1 is 3G and SIM2 is 3G");
+            return SimCardID.ID_ZERO;
+        } else {
+            Log.e(TAG, "getSimCardIdForVT(): SIM1: " + propNetworkTypeSim1 + ", SIM2: " + propNetworkTypeSim2);
+            return null;
+        }
+    }
+
+    public void dialButtonPressed(SimCardID simId, boolean isVT) {
+        if (isDigitsEmpty()) { // No number entered.
+            if (phoneIsCdma() && phoneIsOffhook()) {
+                // This is really CDMA specific. On GSM is it possible
+                // to be off hook and wanted to add a 3rd party using
+                // the redial feature.
+                startActivity(newFlashIntent());
+            } else {
+                if (!TextUtils.isEmpty(mLastNumberDialed)) {
+                    // Recall the last number dialed.
+                    mDigits.setText(mLastNumberDialed);
+
+                    // ...and move the cursor to the end of the digits string,
+                    // so you'll be able to delete digits using the Delete
+                    // button (just as if you had typed the number manually.)
+                    //
+                    // Note we use mDigits.getText().length() here, not
+                    // mLastNumberDialed.length(), since the EditText widget now
+                    // contains a *formatted* version of mLastNumberDialed (due to
+                    // mTextWatcher) and its length may have changed.
+                    mDigits.setSelection(mDigits.getText().length());
+                } else {
+                    // There's no "last number dialed" or the
+                    // background query is still running. There's
+                    // nothing useful for the Dial button to do in
+                    // this case.  Note: with a soft dial button, this
+                    // can never happens since the dial button is
+                    // disabled under these conditons.
+                    playTone(ToneGenerator.TONE_PROP_NACK);
+                }
+            }
+        } else {
+            final String number = mDigits.getText().toString();
+
+            // "persist.radio.otaspdial" is a temporary hack needed for one carrier's automated
+            // test equipment.
+            // TODO: clean it up.
+            if (number != null
+                    && !TextUtils.isEmpty(mProhibitedPhoneNumberRegexp)
+                    && number.matches(mProhibitedPhoneNumberRegexp)
+                    && (SystemProperties.getInt("persist.radio.otaspdial", 0) != 1)) {
+                Log.i(TAG, "The phone number is prohibited explicitly by a rule.");
+                if (getActivity() != null) {
+                    DialogFragment dialogFragment = ErrorDialogFragment.newInstance(
+                                    R.string.dialog_phone_call_prohibited_message);
+                    dialogFragment.show(getFragmentManager(), "phone_prohibited_dialog");
+                }
+
+                // Clear the digits just in case.
+                mDigits.getText().clear();
+            } else {
+                if (isVT) {
+                    simId = getSimCardIdForVT();
+                    if (null == simId) {
+                        //simId = SimCardID.ID_ZERO;
+                        Toast.makeText(getActivity(), R.string.vt_not_available, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
+
+                final Intent intent = newDialNumberIntent(number);
+                if (getActivity() instanceof DialtactsActivity) {
+                    intent.putExtra(DialtactsActivity.EXTRA_CALL_ORIGIN,
+                            DialtactsActivity.CALL_ORIGIN_DIALTACTS);
+                }
+
+                intent.putExtra("simId", simId);
+                //intent.putExtra("operation", isVT ? PREFERRED_DIAL_VIDEO : PREFERRED_DIAL_VOICE);
+                startActivity(intent);
+                mDigits.getText().clear();  // TODO: Fix bug 1745781
+                getActivity().finish();
+            }
+        }
+    }
+
+    private Intent newDialNumberIntent(String number) {
+        final Intent intent = new Intent(Intent.ACTION_CALL_PRIVILEGED,
+                                         Uri.fromParts("tel", number, null));
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }
+
+
+    private Intent newEmergencyCallIntent(String number) {
+        final Intent intent = new Intent(Intent.ACTION_CALL_EMERGENCY,
+                                         Uri.fromParts("tel", number, null));
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }
+
     /**
      * In most cases, when the dial button is pressed, there is a
      * number in digits area. Pack it in the intent, start the
@@ -1181,11 +1535,98 @@ public class DialpadFragment extends Fragment
                 // Clear the digits just in case.
                 mDigits.getText().clear();
             } else {
-                final Intent intent = CallUtil.getCallIntent(number,
-                        (getActivity() instanceof DialtactsActivity ?
-                                ((DialtactsActivity) getActivity()).getCallOrigin() : null));
-                startActivity(intent);
-                hideAndClearDialpad();
+                SimCardID simCardId = SimCardID.ID_ZERO;
+                int defalut_simCardId ;
+                boolean popUserMenu = false;
+                final boolean isEmergencySim1 = PhoneNumberUtils.isEmergencyNumber(number, SimCardID.ID_ZERO);
+                final boolean isEmergencySim2 = PhoneNumberUtils.isEmergencyNumber(number, SimCardID.ID_ONE);
+
+                defalut_simCardId = getDefaultSIMId();
+
+                //dual sim
+                if (isEmergencySim1 || isEmergencySim2) {
+                    switch (getCurrentVMStatus()) {
+                        case BCM_SIM_VM_BOTH: {
+                            final boolean isRegistedToNetworkSim1 = isRegisterdToNetwork(SimCardID.ID_ZERO);
+                            final boolean isRegistedToNetworkSim2 = isRegisterdToNetwork(SimCardID.ID_ONE);
+
+                            if (isRegistedToNetworkSim1 && isRegistedToNetworkSim2) {
+                                if(defalut_simCardId == SimCardID.ID_PROMPT.toInt())    {
+                                    popUserMenu = true;
+                                }
+                                else if (defalut_simCardId == SimCardID.ID_ZERO.toInt()){
+                                    simCardId = SimCardID.ID_ZERO;
+                                }
+                                else{
+                                    simCardId = SimCardID.ID_ONE;
+                                }
+                            } else if (isRegistedToNetworkSim1) {
+                                simCardId = SimCardID.ID_ZERO;
+                            } else if (isRegistedToNetworkSim2) {
+                                simCardId = SimCardID.ID_ONE;
+                            } else popUserMenu = true;
+                            break;
+                        }
+                        case BCM_SIM_VM_1: {
+                            simCardId = SimCardID.ID_ZERO;
+                            break;
+                        }
+                        case BCM_SIM_VM_2: {
+                            simCardId = SimCardID.ID_ONE;
+                            break;
+                        }
+                        case BCM_SIM_VM_NONE:
+                        default: {
+                            popUserMenu = true;
+                            break;
+                        }
+                    }
+                } else {
+                    if(isSimStateReady(SimCardID.ID_ZERO) && isSimStateReady(SimCardID.ID_ONE)) {
+                        if(defalut_simCardId == SimCardID.ID_PROMPT.toInt()) {
+                            popUserMenu = true;
+                        }
+                        else if (defalut_simCardId == 0) {
+                            simCardId = SimCardID.ID_ZERO;
+                        }
+                        else {
+                            simCardId = SimCardID.ID_ONE;
+                        }
+                    } else if(isSimStateReady(SimCardID.ID_ZERO)) {
+                        simCardId = SimCardID.ID_ZERO;
+                    } else if(isSimStateReady(SimCardID.ID_ONE)) {
+                        simCardId = SimCardID.ID_ONE;
+                    } else {
+                        simCardId = SimCardID.ID_ZERO;
+                    }
+                }
+
+                final Intent intent ;
+
+                if (isEmergencySim1 || isEmergencySim2) {
+                    intent = newEmergencyCallIntent(number);
+                } else {
+                    intent = newDialNumberIntent(number);
+                }
+
+                if (getActivity() instanceof DialtactsActivity) {
+                    String callOrigin=((DialtactsActivity)getActivity()).getCallOrigin();
+                    if(callOrigin!=null) {
+                        intent.putExtra(DialtactsActivity.EXTRA_CALL_ORIGIN,
+                                ((DialtactsActivity)getActivity()).getCallOrigin());
+                    }
+                }
+
+                if (popUserMenu) {
+                    intent.setClassName("com.android.dialer", "com.android.dialer.PhoneSelect");
+                    intent.setFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+                    startActivityForResult(intent, REQUEST_EXIT_NOTIFY);
+                } else {
+                    intent.putExtra("simId", simCardId);
+                    startActivity(intent);
+                    mClearDigitsOnStop = true;
+                    getActivity().finish();
+                }
             }
         }
     }
@@ -1331,6 +1772,9 @@ public class DialpadFragment extends Fragment
             if (mDialpad != null) mDialpad.setVisibility(View.GONE);
             if (mDialButtonContainer != null) mDialButtonContainer.setVisibility(View.GONE);
 
+            if (null != mDialSearchList) {
+                mDialSearchList.setVisibility(View.GONE);
+            }
             mDialpadChooser.setVisibility(View.VISIBLE);
 
             // Instantiate the DialpadChooserAdapter and hook it up to the
@@ -1348,6 +1792,11 @@ public class DialpadFragment extends Fragment
             }
             if (mDialpad != null) mDialpad.setVisibility(View.VISIBLE);
             if (mDialButtonContainer != null) mDialButtonContainer.setVisibility(View.VISIBLE);
+
+            if (null != mDialSearchList) {
+                mDialSearchList.setVisibility(View.VISIBLE);
+            }
+
             mDialpadChooser.setVisibility(View.GONE);
         }
     }
@@ -1461,8 +1910,11 @@ public class DialpadFragment extends Fragment
     /**
      * Handle clicks from the dialpad chooser.
      */
-    @Override
-    public void onItemClick(AdapterView<?> parent, View v, int position, long id) {
+    public void onItemClick(AdapterView parent, View v, int position, long id) {
+        if (parent == mDialSearchList) {
+            entryDetailSearch();
+            return;
+        }
         DialpadChooserAdapter.ChoiceItem item =
                 (DialpadChooserAdapter.ChoiceItem) parent.getItemAtPosition(position);
         int itemId = item.id;
@@ -1501,7 +1953,7 @@ public class DialpadFragment extends Fragment
      */
     private void returnToInCallScreen(boolean showDialpad) {
         try {
-            ITelephony phone = ITelephony.Stub.asInterface(ServiceManager.checkService("phone"));
+            ITelephony phone = ITelephony.Stub.asInterface(ServiceManager.checkService("phone1"));
             if (phone != null) phone.showCallScreenWithDialpad(showDialpad);
         } catch (RemoteException e) {
             Log.w(TAG, "phone.showCallScreenWithDialpad() failed", e);
@@ -1524,6 +1976,21 @@ public class DialpadFragment extends Fragment
      */
     public boolean phoneIsInUse() {
         return getTelephonyManager().getCallState() != TelephonyManager.CALL_STATE_IDLE;
+    }
+
+    /**
+     * @return default sim id
+     */
+    private int getDefaultSIMId() {
+        int defSimCardId = SimCardID.ID_ZERO.toInt();
+        try {
+            ITelephony phone = ITelephony.Stub.asInterface(ServiceManager.checkService("phone1"));
+            defSimCardId = phone.getDefaultSimForVoiceCalls();
+        } catch (RemoteException e) {
+            Log.w(TAG, "get DefaultSIMId failed", e);
+        }
+
+        return defSimCardId;
     }
 
     /**
@@ -1597,19 +2064,32 @@ public class DialpadFragment extends Fragment
     private void updateDialAndDeleteButtonEnabledState() {
         final boolean digitsNotEmpty = !isDigitsEmpty();
 
-        if (mDialButton != null) {
+        if ((mDialButtonVT != null && mDialButtonSim1 != null && mDialButtonSim2 != null)||
+            (mDialButtonVT != null && mDialButton != null)) {
             // On CDMA phones, if we're already on a call, we *always*
             // enable the Dial button (since you can press it without
             // entering any digits to send an empty flash.)
             if (phoneIsCdma() && phoneIsOffhook()) {
-                mDialButton.setEnabled(true);
+                mDialButtonVT.setEnabled(true);
+                if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                    mDialButtonSim1.setEnabled(true);
+                    mDialButtonSim2.setEnabled(true);
+                }else {
+                    mDialButton.setEnabled(true);
+                }
             } else {
                 // Common case: GSM, or CDMA but not on a call.
                 // Enable the Dial button if some digits have
                 // been entered, or if there is a last dialed number
                 // that could be redialed.
-                mDialButton.setEnabled(digitsNotEmpty ||
-                        !TextUtils.isEmpty(mLastNumberDialed));
+                boolean enable = digitsNotEmpty || !TextUtils.isEmpty(mLastNumberDialed);
+                mDialButtonVT.setEnabled(enable);
+                if(SystemProperties.getInt("ro.dual.sim.phone", 0) == 1) {
+                    mDialButtonSim1.setEnabled(enable);
+                    mDialButtonSim2.setEnabled(enable);
+                }else {
+                    mDialButton.setEnabled(enable);
+                }
             }
         }
         mDelete.setEnabled(digitsNotEmpty);
@@ -1624,7 +2104,8 @@ public class DialpadFragment extends Fragment
      */
     private boolean isVoicemailAvailable() {
         try {
-            return getTelephonyManager().getVoiceMailNumber() != null;
+            return ((TelephonyManager.getDefault(SimCardID.ID_ZERO).getVoiceMailNumber() != null)
+                 || (TelephonyManager.getDefault(SimCardID.ID_ONE).getVoiceMailNumber() != null));
         } catch (SecurityException se) {
             // Possibly no READ_PHONE_STATE privilege.
             Log.w(TAG, "SecurityException is thrown. Maybe privilege isn't sufficient.");
@@ -1707,6 +2188,395 @@ public class DialpadFragment extends Fragment
         final Intent intent = CallUtil.getCallIntent(EMPTY_NUMBER);
         intent.putExtra(EXTRA_SEND_EMPTY_FLASH, true);
         return intent;
+    }
+
+    private void configDialSearchList() {
+        mDialSearchList.setOnItemClickListener(this);
+        mDialSearchList.setOnTouchListener(this);
+        mDialSearchList.setFastScrollEnabled(false);
+
+        // Tell list view to not show dividers. We'll do it ourself so that we can *not* show
+        // them when an A-Z headers is visible.
+        mDialSearchList.setDividerHeight(0);
+
+        // We manually save/restore the listview state
+        mDialSearchList.setSaveEnabled(false);
+
+        // configureVerticalScrollbar();
+        configurePhotoLoader();
+
+        mAdapter = createListAdapter();
+        mAdapter.setSearchMode(true);
+        mAdapter.configureDefaultPartition(false, false);
+        mAdapter.setPhotoLoader(mPhotoManager);
+
+        mDialSearchList.setAdapter(mAdapter);
+
+        mDialSearchList.setFocusableInTouchMode(false);
+    }
+
+    private void configurePhotoLoader() {
+        if (mPhotoManager == null) {
+            mPhotoManager = ContactPhotoManager.getInstance(getActivity());
+        }
+        if (mDialSearchList != null) {
+            mDialSearchList.setOnScrollListener(this);
+        }
+        if (mAdapter != null) {
+            mAdapter.setPhotoLoader(mPhotoManager);
+        }
+    }
+
+    private void entryDetailSearch() {
+        if ((mListener != null) && (null != mDigits)) {
+            mListener.onSearchButtonPressed(mDigits.getText().toString());
+        }
+    }
+
+    @Override
+    public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount,
+            int totalItemCount) {
+    }
+
+    @Override
+    public void onScrollStateChanged(AbsListView view, int scrollState) {
+    }
+
+    /**
+     * Dismisses the soft keyboard when the list is touched.
+     */
+    @Override
+    public boolean onTouch(View view, MotionEvent event) {
+        return false;
+    }
+
+    private PhoneNumberListAdapter createListAdapter() {
+        PhoneNumberListAdapter adapter = new PhoneNumberListAdapter(getActivity());
+        adapter.setDisplayPhotos(true);
+        return adapter;
+    }
+
+    private ContactsPreferences.ChangeListener mPreferencesChangeListener =
+            new ContactsPreferences.ChangeListener() {
+        @Override
+        public void onChange() {
+            loadPreferences();
+            reloadData();
+        }
+    };
+/*
+    @Override
+    public void onStart() {
+        super.onStart();
+
+        if (null != mDialSearchList) {
+            setDirectorySearchMode(DirectoryListLoader.SEARCH_MODE_DATA_SHORTCUT);
+            mContactsPrefs.registerChangeListener(mPreferencesChangeListener);
+
+            mForceLoad = loadPreferences();
+
+            mDirectoryListStatus = STATUS_NOT_LOADED;
+            mLoadPriorityDirectoriesOnly = true;
+
+            startLoading();
+        }
+    }
+*/
+    @Override
+    public void onStop() {
+        super.onStop();
+        if (mClearDigitsOnStop) {
+            mClearDigitsOnStop = false;
+            mDigits.getText().clear();
+        }
+        if (null != mDialSearchList) {
+            mContactsPrefs.unregisterChangeListener();
+            mAdapter.clearPartitions();
+        }
+    }
+
+    private boolean loadPreferences() {
+        boolean changed = false;
+        if (getContactNameDisplayOrder() != mContactsPrefs.getDisplayOrder()) {
+            setContactNameDisplayOrder(mContactsPrefs.getDisplayOrder());
+            changed = true;
+        }
+
+        if (getSortOrder() != mContactsPrefs.getSortOrder()) {
+            setSortOrder(mContactsPrefs.getSortOrder());
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private int getContactNameDisplayOrder() {
+        return mDisplayOrder;
+    }
+
+    private void setContactNameDisplayOrder(int displayOrder) {
+        mDisplayOrder = displayOrder;
+        if (mAdapter != null) {
+            mAdapter.setContactNameDisplayOrder(displayOrder);
+        }
+    }
+
+    private int getSortOrder() {
+        return mSortOrder;
+    }
+
+    private void setSortOrder(int sortOrder) {
+        mSortOrder = sortOrder;
+        if (mAdapter != null) {
+            mAdapter.setSortOrder(sortOrder);
+        }
+    }
+
+    private void reloadData() {
+        removePendingDirectorySearchRequests();
+        mAdapter.onDataReload();
+        mLoadPriorityDirectoriesOnly = true;
+        mForceLoad = true;
+        startLoading();
+    }
+
+    private void startLoading() {
+
+        if (mAdapter == null) {
+            // The method was called before the fragment was started
+            return;
+        }
+
+        configureAdapter();
+        int partitionCount = mAdapter.getPartitionCount();
+        for (int i = 0; i < partitionCount; i++) {
+            Partition partition = mAdapter.getPartition(i);
+            if (partition instanceof DirectoryPartition) {
+                DirectoryPartition directoryPartition = (DirectoryPartition)partition;
+                if (directoryPartition.getStatus() == DirectoryPartition.STATUS_NOT_LOADED) {
+                    if (directoryPartition.isPriorityDirectory() || !mLoadPriorityDirectoriesOnly) {
+                        startLoadingDirectoryPartition(i);
+                    }
+                }
+            } else {
+                getLoaderManager().initLoader(i, null, this);
+            }
+        }
+
+        // Next time this method is called, we should start loading non-priority directories
+        mLoadPriorityDirectoriesOnly = false;
+    }
+
+    private void configureAdapter() {
+        if (mAdapter == null) {
+            return;
+        }
+
+        mAdapter.setQuickContactEnabled(true);
+        mAdapter.setIncludeProfile(false);
+        mAdapter.setQueryString(mQueryString);
+        mAdapter.setDirectorySearchMode(mDirectorySearchMode);
+        mAdapter.setPinnedPartitionHeadersEnabled(false);
+        mAdapter.setContactNameDisplayOrder(mDisplayOrder);
+        mAdapter.setSortOrder(mSortOrder);
+        mAdapter.setSectionHeaderDisplayEnabled(false);
+        mAdapter.setSelectionVisible(false);
+        mAdapter.setDirectoryResultLimit(DEFAULT_DIRECTORY_RESULT_LIMIT);
+        mAdapter.setDarkTheme(true);
+        mAdapter.setPhotoPosition(ContactListItemView.PhotoPosition.LEFT);
+    }
+
+    private final String getQueryString() {
+        return mQueryString;
+    }
+
+    private void setQueryString(String queryString, boolean delaySelection) {
+        // Normalize the empty query.
+        if (TextUtils.isEmpty(queryString)) queryString = null;
+
+        if (!TextUtils.equals(mQueryString, queryString)) {
+            mQueryString = queryString;
+            setSearchMode(!TextUtils.isEmpty(mQueryString));
+
+            if (mAdapter != null) {
+                mAdapter.setQueryString(queryString);
+                reloadData();
+            }
+        }
+    }
+
+    private final boolean isSearchMode() {
+        return mSearchMode;
+    }
+
+    private void setSearchMode(boolean flag) {
+        if (mSearchMode != flag) {
+            mSearchMode = flag;
+        }
+
+        if (!flag) {
+            mDirectoryListStatus = STATUS_NOT_LOADED;
+            getLoaderManager().destroyLoader(DIRECTORY_LOADER_ID);
+        }
+
+        if (mAdapter != null) {
+            mAdapter.setPinnedPartitionHeadersEnabled(false);
+            mAdapter.setSearchMode(true);
+
+            mAdapter.clearPartitions();
+            if (!flag) {
+                // If we are switching from search to regular display,
+                // remove all directory partitions (except the default one).
+                int count = mAdapter.getPartitionCount();
+                for (int i = count; --i >= 1;) {
+                    mAdapter.removePartition(i);
+                }
+            }
+            mAdapter.configureDefaultPartition(false, false);
+        }
+    }
+
+    private Handler mDelayedDirectorySearchHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            if (msg.what == DIRECTORY_SEARCH_MESSAGE) {
+                loadDirectoryPartition(msg.arg1, (DirectoryPartition) msg.obj);
+            }
+        }
+    };
+
+    private void startLoadingDirectoryPartition(int partitionIndex) {
+        DirectoryPartition partition = (DirectoryPartition)mAdapter.getPartition(partitionIndex);
+        partition.setStatus(DirectoryPartition.STATUS_LOADING);
+        long directoryId = partition.getDirectoryId();
+        if (mForceLoad) {
+            if (directoryId == Directory.DEFAULT) {
+                loadDirectoryPartition(partitionIndex, partition);
+            } else {
+                loadDirectoryPartitionDelayed(partitionIndex, partition);
+            }
+        } else {
+            Bundle args = new Bundle();
+            args.putLong(DIRECTORY_ID_ARG_KEY, directoryId);
+            getLoaderManager().initLoader(partitionIndex, args, this);
+        }
+    }
+
+    /**
+     * Queues up a delayed request to search the specified directory. Since
+     * directory search will likely introduce a lot of network traffic, we want
+     * to wait for a pause in the user's typing before sending a directory request.
+     */
+    private void loadDirectoryPartitionDelayed(int partitionIndex, DirectoryPartition partition) {
+        mDelayedDirectorySearchHandler.removeMessages(DIRECTORY_SEARCH_MESSAGE, partition);
+        Message msg = mDelayedDirectorySearchHandler.obtainMessage(
+                DIRECTORY_SEARCH_MESSAGE, partitionIndex, 0, partition);
+        mDelayedDirectorySearchHandler.sendMessageDelayed(msg, DIRECTORY_SEARCH_DELAY_MILLIS);
+    }
+
+    /**
+     * Cancels all queued directory loading requests.
+     */
+    private void removePendingDirectorySearchRequests() {
+        mDelayedDirectorySearchHandler.removeMessages(DIRECTORY_SEARCH_MESSAGE);
+    }
+
+    /**
+     * Loads the directory partition.
+     */
+    private void loadDirectoryPartition(int partitionIndex, DirectoryPartition partition) {
+        Bundle args = new Bundle();
+        args.putLong(DIRECTORY_ID_ARG_KEY, partition.getDirectoryId());
+        getLoaderManager().restartLoader(partitionIndex, args, this);
+    }
+
+    @Override
+    public Loader<Cursor> onCreateLoader(int id, Bundle args) {
+        if (id == DIRECTORY_LOADER_ID) {
+            DirectoryListLoader loader = new DirectoryListLoader(getActivity());
+            //mAdapter.configureDirectoryLoader(loader);
+            return loader;
+        } else {
+            CursorLoader loader = createCursorLoader();
+            long directoryId = args != null && args.containsKey(DIRECTORY_ID_ARG_KEY)
+                    ? args.getLong(DIRECTORY_ID_ARG_KEY)
+                    : Directory.DEFAULT;
+            mAdapter.configureLoader(loader, directoryId);
+            return loader;
+        }
+    }
+
+    private CursorLoader createCursorLoader() {
+        return new CursorLoader(getActivity(), null, null, null, null, null);
+    }
+
+    @Override
+    public void onLoadFinished(Loader<Cursor> loader, Cursor data) {
+        int loaderId = loader.getId();
+        if (loaderId == DIRECTORY_LOADER_ID) {
+            mDirectoryListStatus = STATUS_LOADED;
+            mAdapter.changeDirectories(data);
+            startLoading();
+        } else {
+            onPartitionLoaded(loaderId, data);
+            if (isSearchMode()) {
+                int directorySearchMode = getDirectorySearchMode();
+                if (directorySearchMode != DirectoryListLoader.SEARCH_MODE_NONE) {
+                    if (mDirectoryListStatus == STATUS_NOT_LOADED) {
+                        mDirectoryListStatus = STATUS_LOADING;
+                        getLoaderManager().initLoader(DIRECTORY_LOADER_ID, null, this);
+                    } else {
+                        startLoading();
+                    }
+                }
+            } else {
+                mDirectoryListStatus = STATUS_NOT_LOADED;
+                getLoaderManager().destroyLoader(DIRECTORY_LOADER_ID);
+            }
+        }
+    }
+
+    public void onLoaderReset(Loader<Cursor> loader) {
+    }
+
+    private int getDirectorySearchMode() {
+        return mDirectorySearchMode;
+    }
+
+    private void setDirectorySearchMode(int mode) {
+        mDirectorySearchMode = mode;
+    }
+
+    private void onPartitionLoaded(int partitionIndex, Cursor data) {
+        if (partitionIndex >= mAdapter.getPartitionCount()) {
+            // When we get unsolicited data, ignore it.  This could happen
+            // when we are switching from search mode to the default mode.
+            return;
+        }
+
+        mAdapter.changeCursor(partitionIndex, data);
+
+        if (!isLoading()) {
+            //completeRestoreInstanceState();
+        }
+    }
+
+    private boolean isLoading() {
+        if (mAdapter != null && mAdapter.isLoading()) {
+            return true;
+        }
+
+        if (isLoadingDirectoryList()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean isLoadingDirectoryList() {
+        return isSearchMode() && getDirectorySearchMode() != DirectoryListLoader.SEARCH_MODE_NONE
+                && (mDirectoryListStatus == STATUS_NOT_LOADED
+                        || mDirectoryListStatus == STATUS_LOADING);
     }
 
     @Override

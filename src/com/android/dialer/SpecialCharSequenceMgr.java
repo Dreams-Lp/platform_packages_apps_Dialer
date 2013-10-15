@@ -42,6 +42,16 @@ import com.android.internal.telephony.ITelephony;
 import com.android.internal.telephony.TelephonyCapabilities;
 import com.android.internal.telephony.TelephonyIntents;
 
+import com.android.internal.telephony.RILConstants;
+import com.android.internal.telephony.RILConstants.SimCardID;
+import android.app.Dialog;
+import android.os.SystemProperties;
+import android.provider.Settings;
+import android.widget.LinearLayout;
+import android.widget.Button;
+import android.view.View;
+import android.view.LayoutInflater;
+
 /**
  * Helper class to listen for some magic character sequences
  * that are handled specially by the dialer.
@@ -59,6 +69,8 @@ public class SpecialCharSequenceMgr {
 
     private static final String MMI_IMEI_DISPLAY = "*#06#";
     private static final String MMI_REGULATORY_INFO_DISPLAY = "*#07#";
+
+    private static Dialog sSimChooserDialog;
 
     /**
      * Remembers the previous {@link QueryHandler} and cancel the operation when needed, to
@@ -85,6 +97,9 @@ public class SpecialCharSequenceMgr {
         return handleChars(context, input, false, textField);
     }
 
+    public static boolean handleChars(Context context, String input, EditText textField, int simId) {
+        return handleChars(context, input, false, textField, simId);
+    }
     static boolean handleChars(Context context, String input) {
         return handleChars(context, input, false, null);
     }
@@ -95,17 +110,64 @@ public class SpecialCharSequenceMgr {
         //get rid of the separators so that the string gets parsed correctly
         String dialString = PhoneNumberUtils.stripSeparators(input);
 
-        if (handleIMEIDisplay(context, dialString, useSystemWindow)
-                || handleRegulatoryInfoDisplay(context, dialString)
-                || handlePinEntry(context, dialString)
-                || handleAdnEntry(context, dialString, textField)
-                || handleSecretCode(context, dialString)) {
+        /* move phone related functions to handleChars with simId */
+        if ( handleSecretCode(context, dialString)) {
             return true;
         }
 
         return false;
     }
 
+    static boolean handleChars(Context context, String input, boolean useSystemWindow,
+            EditText textField, int simId) {
+
+        //get rid of the separators so that the string gets parsed correctly
+        String dialString = PhoneNumberUtils.stripSeparators(input);
+
+        if (handleIMEIDisplay(context, dialString, useSystemWindow, simId)
+                || handlePinEntry(context, dialString, simId)
+                || handleAdnEntry(context, dialString, textField, simId)) {
+            return true;
+        }
+
+        return false;
+    }
+    /**
+        * New function for dual sim
+        * For dual sim cards, handleChars() only deal with non sim related chars. Other chars need to be check here.
+        * @retrun true if we should handle chars(show dialog to choose sim id then), but the handling could be a failure for now.
+        */
+    public static boolean handleSimRelatedChars(final Context context, final String input, final EditText textField){
+        if(isAdnEntry(context, input) || isPinEntry(input) || isIMEIDisplayEntry(input)){
+            //Create dialog chooser
+            LinearLayout chooser = (LinearLayout) LayoutInflater.from(context).inflate(
+                    R.layout.sim_chooser_dialog_view, null);
+            Button sim1 = (Button)chooser.findViewById(R.id.sim_chooser_card_1);
+            Button sim2 = (Button)chooser.findViewById(R.id.sim_chooser_card_2);
+            sim1.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    handleChars(context, input, textField, SimCardID.ID_ZERO.toInt());
+                    sSimChooserDialog.dismiss();
+                }
+            });
+            sim2.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    handleChars(context, input, textField, SimCardID.ID_ONE.toInt());
+                    sSimChooserDialog.dismiss();
+                }
+            });
+            AlertDialog.Builder builder = new AlertDialog.Builder(context);
+            builder.setView(chooser);
+            builder.setTitle(R.string.select_sim);
+
+            //Aways create a new instance, since it may be stale (activity not the same)by now.
+            sSimChooserDialog = builder.create();
+
+            sSimChooserDialog.show();
+            return true;
+        }
+        return false;
+    }
     /**
      * Cleanup everything around this class. Must be run inside the main thread.
      *
@@ -143,6 +205,33 @@ public class SpecialCharSequenceMgr {
         }
 
         return false;
+    }
+
+    private static boolean isAdnEntry(Context context, String input){
+        /* ADN entries are of the form "N(N)(N)#" */
+
+        // if the phone is keyguard-restricted, then just ignore this
+        // input.  We want to make sure that sim card contacts are NOT
+        // exposed unless the phone is unlocked, and this code can be
+        // accessed from the emergency dialer.
+        KeyguardManager keyguardManager =
+                (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        if (keyguardManager.inKeyguardRestrictedInputMode()) {
+            return false;
+        }
+
+        int len = input.length();
+        if ((len > 1) && (len < 5) && (input.endsWith("#"))) {
+            try {
+                // get the ordinal number of the sim contact
+                int index = Integer.parseInt(input.substring(0, len-1));
+                return true;
+            } catch (NumberFormatException ex) {
+                return false;
+            }
+        }
+        else
+            return false;
     }
 
     /**
@@ -226,10 +315,92 @@ public class SpecialCharSequenceMgr {
         return false;
     }
 
+    static boolean handleAdnEntry(Context context, String input, EditText textField, int simId) {
+        /* ADN entries are of the form "N(N)(N)#" */
+
+        TelephonyManager telephonyManager =
+                (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+        if (telephonyManager == null
+                || !TelephonyCapabilities.supportsAdn(telephonyManager.getCurrentPhoneType())) {
+            return false;
+        }
+
+        // if the phone is keyguard-restricted, then just ignore this
+        // input.  We want to make sure that sim card contacts are NOT
+        // exposed unless the phone is unlocked, and this code can be
+        // accessed from the emergency dialer.
+        KeyguardManager keyguardManager =
+                (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        if (keyguardManager.inKeyguardRestrictedInputMode()) {
+            return false;
+        }
+
+        int len = input.length();
+        if ((len > 1) && (len < 5) && (input.endsWith("#"))) {
+            try {
+                // get the ordinal number of the sim contact
+                int index = Integer.parseInt(input.substring(0, len-1));
+
+                // The original code that navigated to a SIM Contacts list view did not
+                // highlight the requested contact correctly, a requirement for PTCRB
+                // certification.  This behaviour is consistent with the UI paradigm
+                // for touch-enabled lists, so it does not make sense to try to work
+                // around it.  Instead we fill in the the requested phone number into
+                // the dialer text field.
+
+                // create the async query handler
+                QueryHandler handler = new QueryHandler (context.getContentResolver());
+
+                // create the cookie object
+                SimContactQueryCookie sc = new SimContactQueryCookie(index - 1, handler,
+                        ADN_QUERY_TOKEN);
+
+                // setup the cookie fields
+                sc.contactNum = index - 1;
+                sc.setTextField(textField);
+
+                // create the progress dialog
+                sc.progressDialog = new ProgressDialog(context);
+                sc.progressDialog.setTitle(R.string.simContacts_title);
+                sc.progressDialog.setMessage(context.getText(R.string.simContacts_emptyLoading));
+                sc.progressDialog.setIndeterminate(true);
+                sc.progressDialog.setCancelable(true);
+                sc.progressDialog.setOnCancelListener(sc);
+                sc.progressDialog.getWindow().addFlags(
+                        WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+
+                // display the progress dialog
+                sc.progressDialog.show();
+
+                // run the query.
+                handler.startQuery(ADN_QUERY_TOKEN, sc, (SimCardID.ID_ONE.toInt() == simId)?Uri.parse("content://icc2/adn"):Uri.parse("content://icc/adn"),
+                        new String[]{ADN_PHONE_NUMBER_COLUMN_NAME}, null, null, null);
+
+                if (sPreviousAdnQueryHandler != null) {
+                    // It is harmless to call cancel() even after the handler's gone.
+                    sPreviousAdnQueryHandler.cancel();
+                }
+                sPreviousAdnQueryHandler = handler;
+                return true;
+            } catch (NumberFormatException ex) {
+                // Ignore
+            }
+        }
+        return false;
+    }
+
+    private static boolean isPinEntry(String input){
+        if ((input.startsWith("**04") || input.startsWith("**05")) && input.endsWith("#")) {
+            return true;
+        }
+        else
+            return false;
+    }
+
     static boolean handlePinEntry(Context context, String input) {
         if ((input.startsWith("**04") || input.startsWith("**05")) && input.endsWith("#")) {
             try {
-                return ITelephony.Stub.asInterface(ServiceManager.getService("phone"))
+                return ITelephony.Stub.asInterface(ServiceManager.getService("phone1"))
                         .handlePinMmi(input);
             } catch (RemoteException e) {
                 Log.e(TAG, "Failed to handlePinMmi due to remote exception");
@@ -239,9 +410,31 @@ public class SpecialCharSequenceMgr {
         return false;
     }
 
+    static boolean handlePinEntry(Context context, String input, int simId) {
+        if ((input.startsWith("**04") || input.startsWith("**05")) && input.endsWith("#")) {
+            try {
+                return ITelephony.Stub.asInterface(ServiceManager.getService((SimCardID.ID_ONE.toInt() == simId)?"phone2":"phone1"))
+                        .handlePinMmi(input);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to handlePinMmi due to remote exception");
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isIMEIDisplayEntry(String input){
+        if (input.equals(MMI_IMEI_DISPLAY)) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+
     static boolean handleIMEIDisplay(Context context, String input, boolean useSystemWindow) {
         TelephonyManager telephonyManager =
-                (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+                (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE1);
         if (telephonyManager != null && input.equals(MMI_IMEI_DISPLAY)) {
             int phoneType = telephonyManager.getCurrentPhoneType();
             if (phoneType == TelephonyManager.PHONE_TYPE_GSM) {
@@ -249,6 +442,23 @@ public class SpecialCharSequenceMgr {
                 return true;
             } else if (phoneType == TelephonyManager.PHONE_TYPE_CDMA) {
                 showMEIDPanel(context, useSystemWindow, telephonyManager);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    static boolean handleIMEIDisplay(Context context, String input, boolean useSystemWindow, int simId) {
+        if (input.equals(MMI_IMEI_DISPLAY)) {
+            int phoneType = ((TelephonyManager)context.getSystemService(
+                    (SimCardID.ID_ONE.toInt() == simId)?Context.TELEPHONY_SERVICE2:Context.TELEPHONY_SERVICE1)).getCurrentPhoneType();
+
+            if (phoneType == TelephonyManager.PHONE_TYPE_GSM) {
+                showIMEIPanel(context, useSystemWindow, simId);
+                return true;
+            } else if (phoneType == TelephonyManager.PHONE_TYPE_CDMA) {
+                showMEIDPanel(context, useSystemWindow, simId);
                 return true;
             }
         }
@@ -291,9 +501,33 @@ public class SpecialCharSequenceMgr {
                 .show();
     }
 
+    static void showIMEIPanel(Context context, boolean useSystemWindow, int simId) {
+        String imeiStr = ((TelephonyManager)context.getSystemService((SimCardID.ID_ONE.toInt() == simId)?Context.TELEPHONY_SERVICE2:Context.TELEPHONY_SERVICE1))
+                .getDeviceId();
+
+        AlertDialog alert = new AlertDialog.Builder(context)
+                .setTitle(R.string.imei)
+                .setMessage(imeiStr)
+                .setPositiveButton(android.R.string.ok, null)
+                .setCancelable(false)
+                .show();
+    }
+
     private static void showMEIDPanel(Context context, boolean useSystemWindow,
             TelephonyManager telephonyManager) {
         String meidStr = telephonyManager.getDeviceId();
+
+        AlertDialog alert = new AlertDialog.Builder(context)
+                .setTitle(R.string.meid)
+                .setMessage(meidStr)
+                .setPositiveButton(android.R.string.ok, null)
+                .setCancelable(false)
+                .show();
+    }
+
+    static void showMEIDPanel(Context context, boolean useSystemWindow, int simId) {
+        String meidStr = ((TelephonyManager)context.getSystemService((SimCardID.ID_ONE.toInt() == simId)?Context.TELEPHONY_SERVICE2:Context.TELEPHONY_SERVICE1))
+                .getDeviceId();
 
         AlertDialog alert = new AlertDialog.Builder(context)
                 .setTitle(R.string.meid)
@@ -414,6 +648,13 @@ public class SpecialCharSequenceMgr {
                 Context context = sc.progressDialog.getContext();
                 name = context.getString(R.string.menu_callNumber, name);
                 Toast.makeText(context, name, Toast.LENGTH_SHORT)
+                    .show();
+            } else {
+                Context context = sc.progressDialog.getContext();
+                new AlertDialog.Builder(context)
+                    .setTitle(R.string.simContacts_title)
+                    .setMessage(R.string.noSimRecord)
+                    .setPositiveButton(android.R.string.ok, null)
                     .show();
             }
         }

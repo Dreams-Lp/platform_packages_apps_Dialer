@@ -44,6 +44,8 @@ import java.util.List;
 
 import javax.annotation.concurrent.GuardedBy;
 
+import com.android.internal.telephony.RILConstants.SimCardID;
+
 /** Handles asynchronous queries to the call log. */
 public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
     private static final String[] EMPTY_STRING_ARRAY = new String[0];
@@ -141,7 +143,31 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
     public void fetchCalls(int callType, long newerThan) {
         cancelFetch();
         int requestId = newCallsRequest();
-        fetchCalls(QUERY_CALLLOG_TOKEN, requestId, callType, false /* newOnly */, newerThan);
+        fetchCalls(QUERY_CALLLOG_TOKEN, requestId, callType, false /* newOnly */, newerThan, -1);
+    }
+
+    /**
+     * Fetches the list of calls from the call log.
+     * <p>
+     * It will asynchronously update the content of the list view when the fetch completes.
+     */
+    public void fetchAllCalls() {
+        cancelFetch();
+        int requestId = newCallsRequest();
+        fetchCalls(QUERY_CALLLOG_TOKEN, requestId, -1 /*voicemailOnly*/, true /*isNew*/, -1 /*newerThan*/,  -1 /*simid*/);
+        fetchCalls(QUERY_CALLLOG_TOKEN, requestId, -1 /*voicemailOnly*/, false /*isNew*/, -1 /*newerThan*/,  -1 /*simid*/);
+    }
+
+    /**
+     * Fetches the list of calls from the call log but include only the voicemail.
+     * <p>
+     * It will asynchronously update the content of the list view when the fetch completes.
+     */
+    public void fetchCallsbyType(int callType , int simid) {
+        cancelFetch();
+        int requestId = newCallsRequest();
+        fetchCalls(QUERY_CALLLOG_TOKEN, requestId, callType /*voicemailOnly*/, true /*isNew*/, -1 /*newerThan*/, simid /*simid*/);
+        fetchCalls(QUERY_CALLLOG_TOKEN, requestId, callType /*voicemailOnly*/, false /*isNew*/, -1/*newerThan*/, simid /*simid*/);
     }
 
     public void fetchCalls(int callType) {
@@ -155,7 +181,7 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
 
     /** Fetches the list of calls in the call log. */
     private void fetchCalls(int token, int requestId, int callType, boolean newOnly,
-            long newerThan) {
+            long newerThan, int simid) {
         // We need to check for NULL explicitly otherwise entries with where READ is NULL
         // may not match either the query or its negation.
         // We consider the calls that are not yet consumed (i.e. IS_READ = 0) as "new".
@@ -175,6 +201,20 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
             where.append(String.format("(%s = ?)", Calls.TYPE));
             // Add a clause to fetch only items newer than the requested date
             selectionArgs.add(Integer.toString(callType));
+            if(SimCardID.ID_ZERO.toInt() == simid){
+                // Add a clause to fetch only items of type INCOMING.
+                where.append(" AND ");
+                where.append(String.format("(%s = ?)", Calls.SIM_ID));
+                //selection = String.format("(%s) AND (%s = ?)", selection, Calls.SIM_ID);
+                selectionArgs.add(Integer.toString(SimCardID.ID_ZERO.toInt()));
+            } else if (SimCardID.ID_ONE.toInt() == simid) {
+                // Add a clause to fetch only items of type OUTGOING.
+                where.append(" AND ");
+                where.append(String.format("(%s = ?)", Calls.SIM_ID));
+                //selection = String.format("(%s) AND (%s = ?)", selection, Calls.SIM_ID);
+                selectionArgs.add(Integer.toString(SimCardID.ID_ONE.toInt()));
+            }
+
         }
 
         if (newerThan > 0) {

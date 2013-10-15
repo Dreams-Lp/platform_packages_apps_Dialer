@@ -59,13 +59,22 @@ public class PhoneCallDetails {
      * This is meant to store the high-res photo only.
      */
     public final Uri photoUri;
+    /** The sim card id of the call */
+    public final int[] simIds;
 
     /** Create the details for a call with a number not associated with a contact. */
     public PhoneCallDetails(CharSequence number, int numberPresentation,
             CharSequence formattedNumber, String countryIso, String geocode,
             int[] callTypes, long date, long duration) {
         this(number, numberPresentation, formattedNumber, countryIso, geocode,
-                callTypes, date, duration, "", 0, "", null, null);
+                callTypes, date, duration, "", 0, "",
+                null, null, new int[callTypes.length]);
+    }
+
+    public PhoneCallDetails(CharSequence number, int numberPresentation, CharSequence formattedNumber,
+            String countryIso, String geocode, int[] callTypes, long date, long duration, int[] simIds) {
+        this(number, numberPresentation, formattedNumber, countryIso, geocode, callTypes, date, duration, "", 0, "",
+                null, null, simIds);
     }
 
     /** Create the details for a call with a number associated with a contact. */
@@ -74,6 +83,16 @@ public class PhoneCallDetails {
             int[] callTypes, long date, long duration, CharSequence name,
             int numberType, CharSequence numberLabel, Uri contactUri,
             Uri photoUri) {
+        this(number, numberPresentation, formattedNumber,
+                countryIso, geocode, callTypes, date, duration,
+                name, numberType, numberLabel, contactUri,
+                photoUri, new int[callTypes.length]);
+    }
+
+    public PhoneCallDetails(CharSequence number, int numberPresentation, CharSequence formattedNumber,
+            String countryIso, String geocode, int[] callTypes, long date, long duration,
+            CharSequence name, int numberType, CharSequence numberLabel, Uri contactUri,
+            Uri photoUri, int[] simIds) {
         this.number = number;
         this.numberPresentation = numberPresentation;
         this.formattedNumber = formattedNumber;
@@ -87,5 +106,6 @@ public class PhoneCallDetails {
         this.numberLabel = numberLabel;
         this.contactUri = contactUri;
         this.photoUri = photoUri;
+        this.simIds = simIds;
     }
 }

@@ -609,15 +609,15 @@ public class CallLogAdapter extends GroupingListAdapter
         final int[] callTypes = getCallTypes(c, count);
         final String geocode = c.getString(CallLogQuery.GEOCODED_LOCATION);
         final PhoneCallDetails details;
-
+        final int[] simIds = getSimIds(c, count);
         if (TextUtils.isEmpty(name)) {
             details = new PhoneCallDetails(number, numberPresentation,
                     formattedNumber, countryIso, geocode, callTypes, date,
-                    duration);
+                    duration, simIds);
         } else {
             details = new PhoneCallDetails(number, numberPresentation,
                     formattedNumber, countryIso, geocode, callTypes, date,
-                    duration, name, ntype, label, lookupUri, photoUri);
+                    duration, name, ntype, label, lookupUri, photoUri, simIds);
         }
 
         final boolean isNew = c.getInt(CallLogQuery.IS_READ) == 0;
@@ -853,6 +853,24 @@ public class CallLogAdapter extends GroupingListAdapter
         }
         cursor.moveToPosition(position);
         return callTypes;
+    }
+
+    /**
+     * Returns the Sim Ids for the given number of items in the cursor.
+     * <p>
+     * It uses the next {@code count} rows in the cursor to extract the Sim Id.
+     * <p>
+     * It position in the cursor is unchanged by this function.
+     */
+    private int[] getSimIds(Cursor cursor, int count) {
+        int position = cursor.getPosition();
+        int[] simIds = new int[count];
+        for (int index = 0; index < count; ++index) {
+            simIds[index] = cursor.getInt(CallLogQuery.SIM_ID);
+            cursor.moveToNext();
+        }
+        cursor.moveToPosition(position);
+        return simIds;
     }
 
     private void setPhoto(CallLogListItemViews views, long photoId, Uri contactUri) {
