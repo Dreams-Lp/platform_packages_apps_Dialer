@@ -69,14 +69,16 @@ public class UndemoteOutgoingCallReceiver extends BroadcastReceiver {
         final Cursor cursor = context.getContentResolver().query(contactUri, new String[] {
                 PhoneLookup._ID}, null, null, null);
         try {
-            if (cursor.moveToFirst()) {
+            if (cursor != null && cursor.moveToFirst()) {
                 final long id = cursor.getLong(0);
                 return id;
             } else {
                 return NO_CONTACT_FOUND;
             }
         } finally {
-            cursor.close();
+            if (cursor != null) {
+                cursor.close();
+            }
         }
     }
 }
