@@ -252,7 +252,7 @@ public class SpecialCharSequenceMgr {
                     // Voice preferred subscription.
                     subscription = MSimTelephonyManager.getDefault()
                             .getPreferredVoiceSubscription();
-                    return ITelephonyMSim.Stub.asInterface(ServiceManager.getService("phone_msim"))
+                    return ITelephonyMSim.Stub.asInterface(ServiceManager.getService("phone"))
                             .handlePinMmi(input, subscription);
                 } else {
                     return ITelephony.Stub.asInterface(ServiceManager.getService("phone"))
