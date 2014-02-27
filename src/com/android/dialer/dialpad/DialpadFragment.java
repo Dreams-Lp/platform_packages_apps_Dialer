@@ -45,6 +45,8 @@ import android.provider.Settings;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
+import android.telephony.SimInfoManager.SimInfoRecord;
+import android.telephony.SubInfoRecord;
 import android.text.Editable;
 import android.text.SpannableString;
 import android.text.TextUtils;
@@ -86,6 +88,7 @@ import com.android.dialer.DialtactsActivity;
 import com.android.dialer.R;
 import com.android.dialer.SpecialCharSequenceMgr;
 import com.android.dialer.database.DialerDatabaseHelper;
+import com.android.dialer.dsds.SimSubInfoWrapper;
 import com.android.dialer.interactions.PhoneNumberInteraction;
 import com.android.dialer.util.OrientationUtil;
 import com.android.internal.telephony.ITelephony;
@@ -94,6 +97,7 @@ import com.android.phone.common.HapticFeedback;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.util.HashSet;
+import java.util.List;
 
 /**
  * Fragment that displays a twelve-key phone dialpad.
@@ -1624,7 +1628,13 @@ public class DialpadFragment extends Fragment
      */
     private boolean isVoicemailAvailable() {
         try {
-            return getTelephonyManager().getVoiceMailNumber() != null;
+            TelephonyManager telephonyManager = getTelephonyManager();
+            final List<SubInfoRecord> subInfos = SimSubInfoWrapper.getInstance().getActiveSubInfos();
+            for (SubInfoRecord subInfo: subInfos){
+               if (telephonyManager.getVoiceMailNumber(subInfo.mSubId) != null){
+                   return true;
+               }
+            }
         } catch (SecurityException se) {
             // Possibly no READ_PHONE_STATE privilege.
             Log.w(TAG, "SecurityException is thrown. Maybe privilege isn't sufficient.");
