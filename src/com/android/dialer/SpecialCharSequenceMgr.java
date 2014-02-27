@@ -16,6 +16,9 @@
 
 package com.android.dialer;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import android.app.AlertDialog;
 import android.app.KeyguardManager;
 import android.app.ProgressDialog;
@@ -31,13 +34,18 @@ import android.os.Looper;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubInfoRecord;
 import android.telephony.TelephonyManager;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.ListAdapter;
 import android.widget.Toast;
 
 import com.android.contacts.common.database.NoNullCursorAsyncQueryHandler;
+import com.android.dialer.dsds.SimPickerDialog;
+import com.android.dialer.dsds.SimSubInfoWrapper;
 import com.android.internal.telephony.ITelephony;
 import com.android.internal.telephony.TelephonyCapabilities;
 import com.android.internal.telephony.TelephonyIntents;
@@ -206,19 +214,29 @@ public class SpecialCharSequenceMgr {
                 sc.progressDialog.getWindow().addFlags(
                         WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
 
-                // display the progress dialog
-                sc.progressDialog.show();
+                SimSubInfoWrapper subscriptionWrapper = SimSubInfoWrapper.getInstance();
+                final int activeSubInfoCount = subscriptionWrapper.getActiveSubInfoCount();
+                if (subscriptionWrapper.getSimCount() == 1 && activeSubInfoCount == 1) {
+                    // display the progress dialog
+                    sc.progressDialog.show();
+                    // run the query.
+                    Uri uri = SimSubInfoWrapper.getInstance().getAdnUri(
+                            subscriptionWrapper.getActiveSubInfos().get(0).mSubId);
+                    logd("handleAdnEntry, single sim, uri=" + uri);
+                    handler.startQuery(ADN_QUERY_TOKEN, sc, uri,
+                            new String[] {ADN_PHONE_NUMBER_COLUMN_NAME}, null, null, null);
 
-                // run the query.
-                handler.startQuery(ADN_QUERY_TOKEN, sc, Uri.parse("content://icc/adn"),
-                        new String[]{ADN_PHONE_NUMBER_COLUMN_NAME}, null, null, null);
-
-                if (sPreviousAdnQueryHandler != null) {
-                    // It is harmless to call cancel() even after the handler's gone.
-                    sPreviousAdnQueryHandler.cancel();
+                    if (sPreviousAdnQueryHandler != null) {
+                        // It is harmless to call cancel() even after the handler's gone.
+                        sPreviousAdnQueryHandler.cancel();
+                    }
+                    sPreviousAdnQueryHandler = handler;
+                    return true;
+                } else if (activeSubInfoCount > 1) {
+                    DialogInterface.OnClickListener listener = new AdnQueryDialogListener(handler, sc);
+                    SimPickerDialog.create(context, listener).show();
+                    return true;
                 }
-                sPreviousAdnQueryHandler = handler;
-                return true;
             } catch (NumberFormatException ex) {
                 // Ignore
             }
@@ -228,12 +246,22 @@ public class SpecialCharSequenceMgr {
 
     static boolean handlePinEntry(Context context, String input) {
         if ((input.startsWith("**04") || input.startsWith("**05")) && input.endsWith("#")) {
-            try {
-                return ITelephony.Stub.asInterface(ServiceManager.getService("phone"))
-                        .handlePinMmi(input);
-            } catch (RemoteException e) {
-                Log.e(TAG, "Failed to handlePinMmi due to remote exception");
-                return false;
+            SimSubInfoWrapper subscriptionWrapper = SimSubInfoWrapper.getInstance();
+            final int activeSubInfoCount = subscriptionWrapper.getActiveSubInfoCount();
+            if (subscriptionWrapper.getSimCount() == 1 && activeSubInfoCount == 1) {
+                logd("handlePinEntry, single SIM");
+                try {
+                    return ITelephony.Stub.asInterface(ServiceManager.getService("phone"))
+                            .handlePinMmi(input);
+                } catch (RemoteException e) {
+                    Log.e(TAG, "Failed to handlePinMmi due to remote exception");
+                    return false;
+                }
+            } else if (activeSubInfoCount > 1) {
+                logd("handlePinEntry, show sim select dialog.");
+                PinDialogListener listener = new PinDialogListener(input);
+                SimPickerDialog.create(context, listener).show();
+                return true;
             }
         }
         return false;
@@ -243,14 +271,8 @@ public class SpecialCharSequenceMgr {
         TelephonyManager telephonyManager =
                 (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
         if (telephonyManager != null && input.equals(MMI_IMEI_DISPLAY)) {
-            int phoneType = telephonyManager.getCurrentPhoneType();
-            if (phoneType == TelephonyManager.PHONE_TYPE_GSM) {
-                showIMEIPanel(context, useSystemWindow, telephonyManager);
-                return true;
-            } else if (phoneType == TelephonyManager.PHONE_TYPE_CDMA) {
-                showMEIDPanel(context, useSystemWindow, telephonyManager);
-                return true;
-            }
+            showDeviceIdPanel(context, telephonyManager);
+            return true;
         }
 
         return false;
@@ -273,34 +295,21 @@ public class SpecialCharSequenceMgr {
         return false;
     }
 
-    // TODO: Combine showIMEIPanel() and showMEIDPanel() into a single
-    // generic "showDeviceIdPanel()" method, like in the apps/Phone
-    // version of SpecialCharSequenceMgr.java.  (This will require moving
-    // the phone app's TelephonyCapabilities.getDeviceIdLabel() method
-    // into the telephony framework, though.)
+    private static boolean showDeviceIdPanel(Context context, TelephonyManager telephonyManager) {
+        final int[] simIds = SimSubInfoWrapper.getInstance().getSimIds();
+        String imei_invalid = context.getResources().getString(R.string.imei_invalid);
+        List<String> imeis = new ArrayList<String>();
+        for (int simId : simIds) {
+            String imei = telephonyManager.getDeviceId(simId);
+            imeis.add(TextUtils.isEmpty(imei) ? imei_invalid : imei);
+        }
 
-    private static void showIMEIPanel(Context context, boolean useSystemWindow,
-            TelephonyManager telephonyManager) {
-        String imeiStr = telephonyManager.getDeviceId();
-
-        AlertDialog alert = new AlertDialog.Builder(context)
-                .setTitle(R.string.imei)
-                .setMessage(imeiStr)
+        AlertDialog alert = new AlertDialog.Builder(context).setTitle(R.string.imei)
+                .setItems(imeis.toArray(new String[imeis.size()]), null)
                 .setPositiveButton(android.R.string.ok, null)
                 .setCancelable(false)
                 .show();
-    }
-
-    private static void showMEIDPanel(Context context, boolean useSystemWindow,
-            TelephonyManager telephonyManager) {
-        String meidStr = telephonyManager.getDeviceId();
-
-        AlertDialog alert = new AlertDialog.Builder(context)
-                .setTitle(R.string.meid)
-                .setMessage(meidStr)
-                .setPositiveButton(android.R.string.ok, null)
-                .setCancelable(false)
-                .show();
+        return true;
     }
 
     /*******
@@ -424,5 +433,67 @@ public class SpecialCharSequenceMgr {
             // query already started.
             cancelOperation(ADN_QUERY_TOKEN);
         }
+    }
+
+    private static class PinDialogListener implements DialogInterface.OnClickListener {
+        private String mInputPinText;
+        public PinDialogListener(String pinText) {
+            mInputPinText = pinText;
+        }
+
+        @Override
+        public void onClick(DialogInterface dialog, int which) {
+            SubInfoRecord subInfo = SimPickerDialog.getSelectedItem(dialog, which);
+            if (subInfo == null || !SimSubInfoWrapper.getInstance().hasIccCard(subInfo.mSimId)) {
+                // SIM status is not corrected.
+                return;
+            }
+
+            try {
+                boolean result = ITelephony.Stub.asInterface(ServiceManager.getService("phone"))
+                        .handlePinMmiUsingSub((int)subInfo.mSubId, mInputPinText);
+                logd("handlePinEntry(" + mInputPinText + ", " + subInfo.mSimId + ") " + result);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to handlePinMmi due to remote exception");
+            }
+        }
+    }
+
+    private static class AdnQueryDialogListener implements DialogInterface.OnClickListener {
+        private QueryHandler mHandler;
+        private SimContactQueryCookie mCookie;
+
+        public AdnQueryDialogListener(QueryHandler handler, SimContactQueryCookie cookie) {
+            mHandler = handler;
+            mCookie = cookie;
+        }
+
+        @Override
+        public void onClick(DialogInterface dialog, int which) {
+            dialog.dismiss();
+
+            SubInfoRecord subInfo = SimPickerDialog.getSelectedItem(dialog, which);
+            if (subInfo == null || !SimSubInfoWrapper.getInstance().hasIccCard(subInfo.mSimId)) {
+                // SIM status is not corrected.
+                return;
+            }
+
+            // display the progress dialog
+            mCookie.progressDialog.show();
+
+            Uri uri = SimSubInfoWrapper.getInstance().getAdnUri(subInfo.mSubId);
+            logd("handleAdnEntry, subId=" + subInfo.mSubId + " uri=" + uri);
+            mHandler.startQuery(ADN_QUERY_TOKEN, mCookie, uri,
+                        new String[] {ADN_PHONE_NUMBER_COLUMN_NAME}, null, null, null);
+            if (sPreviousAdnQueryHandler != null) {
+                // It is harmless to call cancel() even after the handler's gone.
+                sPreviousAdnQueryHandler.cancel();
+            }
+            sPreviousAdnQueryHandler = mHandler;
+        }
+    };
+
+    private static void logd(String msg) {
+        Log.d(TAG, msg);
     }
 }

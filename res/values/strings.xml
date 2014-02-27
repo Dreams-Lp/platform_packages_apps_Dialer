@@ -510,6 +510,9 @@
     <!-- The title of a dialog that displays the MEID of the CDMA phone -->
     <string name="meid">MEID</string>
 
+    <!-- The content for displaying a invalid IMEI -->
+    <string name="imei_invalid">Invalid</string>
+
     <!-- Dialog text displayed when loading a phone number from the SIM card for speed dial -->
     <string name="simContacts_emptyLoading">Loading from SIM card\u2026</string>
 
@@ -635,4 +638,7 @@
 
     <!-- Content description for dismiss button on badge. [CHAR LIMIT=NONE] -->
     <string name="description_dismiss">Dismiss</string>
+
+    <string name="sim_select_title">Select SIM card</string>
+    <string name="sim_empty_text">SIM <xliff:g id="number">%d</xliff:g></string>
 </resources>
