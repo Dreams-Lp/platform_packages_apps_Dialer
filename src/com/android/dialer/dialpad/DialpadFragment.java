@@ -21,6 +21,7 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.Fragment;
+import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -81,6 +82,7 @@ import com.android.contacts.common.activity.TransactionSafeActivity;
 import com.android.contacts.common.preference.ContactsPreferences;
 import com.android.contacts.common.util.PhoneNumberFormatter;
 import com.android.contacts.common.util.StopWatch;
+import com.android.contacts.util.PhoneCapabilityTester;
 import com.android.dialer.NeededForReflection;
 import com.android.dialer.DialtactsActivity;
 import com.android.dialer.R;
@@ -803,18 +805,28 @@ public class DialpadFragment extends Fragment
     }
 
     private void setupMenuItems(Menu menu) {
+        final MenuItem sendMessageMenuItem = menu.findItem(R.id.menu_send_message);
         final MenuItem addToContactMenuItem = menu.findItem(R.id.menu_add_contacts);
 
-        // We show "add to contacts" menu only when the user is
+        final ComponentName smsComponent = PhoneCapabilityTester.getSmsComponent(mContext);
+
+
+        // We show "add to contacts" and "send message" menu only when the user is
         // seeing usual dialpad and has typed at least one digit.
         // We never show a menu if the "choose dialpad" UI is up.
         if (dialpadChooserVisible() || isDigitsEmpty()) {
             addToContactMenuItem.setVisible(false);
+            sendMessageMenuItem.setVisible(false);
         } else {
             final CharSequence digits = mDigits.getText();
             // Put the current digits string into an intent
             addToContactMenuItem.setIntent(DialtactsActivity.getAddNumberToContactIntent(digits));
             addToContactMenuItem.setVisible(true);
+            // "send message" should be only be availalbe to devices that can send sms
+            if (smsComponent != null) {
+              sendMessageMenuItem.setIntent(DialtactsActivity.getSendMessageIntent(digits, smsComponent));
+              sendMessageMenuItem.setVisible(true);
+            }
         }
     }
 

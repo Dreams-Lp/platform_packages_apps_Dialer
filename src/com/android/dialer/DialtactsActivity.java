@@ -25,6 +25,7 @@ import android.app.FragmentManager;
 import android.app.FragmentManager.BackStackEntry;
 import android.app.FragmentTransaction;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.Drawable;
@@ -947,6 +948,13 @@ public class DialtactsActivity extends TransactionSafeActivity implements View.O
         final Intent intent = new Intent(Intent.ACTION_INSERT_OR_EDIT);
         intent.putExtra(Intents.Insert.PHONE, text);
         intent.setType(Contacts.CONTENT_ITEM_TYPE);
+        return intent;
+    }
+
+    public static Intent getSendMessageIntent(CharSequence text, ComponentName smsComponent) {
+        final Intent intent = new Intent(Intent.ACTION_SENDTO,
+                                Uri.fromParts(CallUtil.SCHEME_SMSTO, text, null));
+        intent.setComponent(smsComponent);
         return intent;
     }
 
