@@ -21,6 +21,7 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.Fragment;
+import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -803,18 +804,23 @@ public class DialpadFragment extends Fragment
     }
 
     private void setupMenuItems(Menu menu) {
+        final MenuItem sendMessageMenuItem = menu.findItem(R.id.menu_send_message);
         final MenuItem addToContactMenuItem = menu.findItem(R.id.menu_add_contacts);
 
-        // We show "add to contacts" menu only when the user is
+        // We show "add to contacts" and "send message" menu only when the user is
         // seeing usual dialpad and has typed at least one digit.
         // We never show a menu if the "choose dialpad" UI is up.
         if (dialpadChooserVisible() || isDigitsEmpty()) {
             addToContactMenuItem.setVisible(false);
+            sendMessageMenuItem.setVisible(false);
         } else {
             final CharSequence digits = mDigits.getText();
             // Put the current digits string into an intent
             addToContactMenuItem.setIntent(DialtactsActivity.getAddNumberToContactIntent(digits));
             addToContactMenuItem.setVisible(true);
+            sendMessageMenuItem.setIntent(new Intent(Intent.ACTION_SENDTO, 
+                                            Uri.fromParts("sms", digits, null)));
+            sendMessageMenuItem.setVisible(true);
         }
     }
 
