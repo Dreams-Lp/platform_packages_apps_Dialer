@@ -36,10 +36,13 @@
             android:textColor="@color/speed_dial_text_color"
             android:layout_alignParentLeft="true"
             android:layout_centerVertical="true"
-            android:gravity="center"
+            android:layout_toLeftOf="@+id/all_contacts_button"
+            android:gravity="left"
+            android:ellipsize="end"
+            android:singleLine="true"
         />
     <Button
-            android:id="@+id/all_contacts_button"
+            android:id="@id/all_contacts_button"
             android:fontFamily="@string/favorites_menu_all_contacts_font_family"
             android:layout_width="wrap_content"
             android:layout_height="@dimen/favorites_menu_all_contacts_height"
