@@ -768,17 +768,17 @@
 
     <!-- The font-family to use for the "speed dial" label on the favorites menu.
          Do not translate. -->
-    <string name="favorites_menu_speed_dial_font_family">sans-serif-light</string>
+    <string name="favorites_menu_speed_dial_font_family" translatable="false">sans-serif-light</string>
 
     <!-- The font-family to use for the "all contacts" label on the favorites menu.
          Do not translate. -->
-    <string name="favorites_menu_all_contacts_font_family">sans-serif</string>
+    <string name="favorites_menu_all_contacts_font_family" translatable="false">sans-serif</string>
 
     <!-- The font-family to use for the text inside the searchbox.
          Do not translate. -->
-    <string name="search_font_family">sans-serif</string>
+    <string name="search_font_family" translatable="false">sans-serif</string>
 
     <!-- The font-family to use for tab text.
          Do not translate. -->
-    <string name="tab_font_family">sans-serif</string>
+    <string name="tab_font_family" translatable="false">sans-serif</string>
 </resources>
