@@ -169,6 +169,9 @@ public class VoicemailPlaybackPresenter {
     private FetchResultHandler mFetchResultHandler;
     private PowerManager.WakeLock mWakeLock;
     private AsyncTask<Void, ?, ?> mPrepareTask;
+    private int mPosition;
+    private boolean mPlaying;
+    private boolean mStop;
 
     public VoicemailPlaybackPresenter(PlaybackView view, MediaPlayerProxy player,
             Uri voicemailUri, ScheduledExecutorService executorService,
@@ -346,22 +349,35 @@ public class VoicemailPlaybackPresenter {
         mView.setSpeakerPhoneOn(mView.isSpeakerPhoneOn());
         mView.setRateDecreaseButtonListener(createRateDecreaseListener());
         mView.setRateIncreaseButtonListener(createRateIncreaseListener());
-        mView.setClipPosition(0, mDuration.get());
-        mView.playbackStopped();
-        // Always disable on stop.
-        mView.disableProximitySensor();
-        if (mStartPlayingImmediately) {
-            resetPrepareStartPlaying(0);
+        if (mPlaying) {
+           resetPrepareStartPlaying(mPosition);
         }
-        // TODO: Now I'm ignoring the bundle, when previously I was checking for contains against
-        // the PAUSED_STATE_KEY, and CLIP_POSITION_KEY.
+        else {
+           stopPlaybackAtPosition(mPosition, mDuration.get());
+           if ((mPosition == 0) && (mStartPlayingImmediately)) {
+               resetPrepareStartPlaying(0);
+           }
+        }
     }
 
     public void onSaveInstanceState(Bundle outState) {
         outState.putInt(CLIP_POSITION_KEY, mView.getDesiredClipPosition());
-        if (!mPlayer.isPlaying()) {
-            outState.putBoolean(PAUSED_STATE_KEY, true);
+        outState.putBoolean(PAUSED_STATE_KEY, mPlaying);
+    }
+
+    public void onRestoreInstanceState(Bundle inState) {
+        if (inState != null) {
+           setPositionAndPlayingStatus(inState.getInt(CLIP_POSITION_KEY,0),
+                                       inState.getBoolean(PAUSED_STATE_KEY, false));
         }
+        else {
+           setPositionAndPlayingStatus(0,false) ;
+        }
+    }
+
+    private void setPositionAndPlayingStatus(int newpos, boolean isplaying) {
+       mPosition = newpos;
+       mPlaying  = isplaying;
     }
 
     public void onDestroy() {
@@ -471,6 +487,7 @@ public class VoicemailPlaybackPresenter {
                 try {
                     // Can throw RejectedExecutionException
                     mPlayer.start();
+                    setPositionAndPlayingStatus(mPlayer.getCurrentPosition(),true);
                     mView.playbackStarted();
                     if (!mWakeLock.isHeld()) {
                         mWakeLock.acquire();
@@ -503,6 +520,7 @@ public class VoicemailPlaybackPresenter {
         mView.playbackError(e);
         mPositionUpdater.stopUpdating();
         mPlayer.release();
+        setPositionAndPlayingStatus(0,false);
     }
 
     public void handleCompletion(MediaPlayer mediaPlayer) {
@@ -539,10 +557,15 @@ public class VoicemailPlaybackPresenter {
         @Override
         public void onStopTrackingTouch(SeekBar arg0) {
             if (mPlayer.isPlaying()) {
+                setPositionAndPlayingStatus(mPlayer.getCurrentPosition(),false);
                 stopPlaybackAtPosition(mPlayer.getCurrentPosition(), mDuration.get());
             }
+            else {
+                setPositionAndPlayingStatus(mView.getDesiredClipPosition(),true);
+            }
+
             if (mShouldResumePlaybackAfterSeeking) {
-                resetPrepareStartPlaying(mView.getDesiredClipPosition());
+                postSuccessfullyFetchedContent();
             }
         }
 
@@ -577,9 +600,11 @@ public class VoicemailPlaybackPresenter {
         @Override
         public void onClick(View arg0) {
             if (mPlayer.isPlaying()) {
+                setPositionAndPlayingStatus(mPlayer.getCurrentPosition(),false);
                 stopPlaybackAtPosition(mPlayer.getCurrentPosition(), mDuration.get());
             } else {
-                resetPrepareStartPlaying(mView.getDesiredClipPosition());
+                setPositionAndPlayingStatus(mPosition,true);
+                postSuccessfullyFetchedContent();
             }
         }
     }
