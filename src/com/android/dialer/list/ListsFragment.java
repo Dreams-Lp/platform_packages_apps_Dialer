@@ -273,6 +273,10 @@ public class ListsFragment extends Fragment implements CallLogQueryHandler.Liste
     @Override
     public void onDestroy() {
         mCallLogAdapter.stopRequestProcessing();
+        //Same as CallLogFragment, ListsFragment also uses CallLogQueryHandler and implements interface
+        //method onCallsFetched().It takes over the cursor in onCallsFetched().
+        //So it needs to close the cursor in onDestroy as well.
+        mCallLogAdapter.changeCursor(null);
         super.onDestroy();
     }
 
