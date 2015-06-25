@@ -608,6 +608,60 @@ public class DialerDatabaseHelper extends SQLiteOpenHelper {
     }
 
     /**
+     * Contact info is different with Contacts and Calendar when
+     * click contact number in calendar.
+     * Removes rows in the smartdial database that matches the contacts that have been
+     * updated have no phone number since last smartdial db update.
+     *
+     * @param db Database pointer to the dialer database.
+     * @param last_update_time Time stamp of last update on the smartdial database
+     */
+    private void removeUpdatedNoPhoneContacts(SQLiteDatabase db, String last_update_time) {
+        final String[] PROJECTION = new String[] {
+                BaseColumns._ID
+            };
+
+        final int CONTACT_ID_PROJECT = 0;
+
+        final String SELECT_UPDATED_CLAUSE =
+                ContactsContract.Contacts.HAS_PHONE_NUMBER + " = 0" + " AND " +
+                ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP + " > ?";
+
+        final Cursor updatedContactCursor = mContext.getContentResolver().query(
+                ContactsContract.Contacts.CONTENT_URI,
+                PROJECTION,
+                SELECT_UPDATED_CLAUSE,
+                new String[] {String.valueOf(last_update_time)}, null);
+
+        if (updatedContactCursor == null) {
+            return;
+        }
+
+        int count = 0;
+
+        db.beginTransaction();
+        try {
+            while (updatedContactCursor.moveToNext()) {
+                final Long updateContactId =
+                        updatedContactCursor.getLong(CONTACT_ID_PROJECT);
+                count = db.delete(Tables.SMARTDIAL_TABLE,
+                                SmartDialDbColumns.CONTACT_ID + "=" + updateContactId, null);
+                db.delete(Tables.PREFIX_TABLE,
+                        PrefixColumns.CONTACT_ID + "=" + updateContactId, null);
+
+                if(DEBUG)
+                {
+                    Log.v(TAG, "Updated contact_id = " + updateContactId + " delete count = " + count);
+                }
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            updatedContactCursor.close();
+            db.endTransaction();
+        }
+    }
+
+    /**
      * Inserts updated contacts as rows to the smartdial table.
      *
      * @param db Database pointer to the smartdial database.
@@ -808,6 +862,20 @@ public class DialerDatabaseHelper extends SQLiteOpenHelper {
                     removeUpdatedContacts(db, updatedContactCursor);
                     if (DEBUG) {
                         stopWatch.lap("Finished deleting updated entries");
+                    }
+
+                    /**
+                     * Contact info is different with Contacts and Calendar when
+                     * click contact number in calendar.
+                     * Cursor returned from PhoneQuery.URI does not include updated contacts which
+                     * have no phone number. This may cause the smartdial table has out of sync
+                     * records for those contacts that have been edited and contain no phone number now.
+                     * Introduce additional step to remove the records in smartdial db that have been
+                     * updated to containing no phone number
+                     */
+                    removeUpdatedNoPhoneContacts(db, lastUpdateMillis);
+                    if (DEBUG) {
+                        stopWatch.lap("Finished deleting no phone updated entries");
                     }
                 }
 
