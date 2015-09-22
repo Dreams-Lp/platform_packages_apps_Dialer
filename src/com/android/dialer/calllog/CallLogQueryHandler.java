@@ -192,21 +192,6 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
                 values, where.toString(), null);
     }
 
-    /** Updates all new voicemails to mark them as old. */
-    public void markNewVoicemailsAsOld() {
-        // Mark all "new" voicemails as not new anymore.
-        StringBuilder where = new StringBuilder();
-        where.append(Calls.NEW);
-        where.append(" = 1 AND ");
-        where.append(Calls.TYPE);
-        where.append(" = ?");
-
-        ContentValues values = new ContentValues(1);
-        values.put(Calls.NEW, "0");
-
-        startUpdate(UPDATE_MARK_VOICEMAILS_AS_OLD_TOKEN, null, Calls.CONTENT_URI_WITH_VOICEMAIL,
-                values, where.toString(), new String[]{ Integer.toString(Calls.VOICEMAIL_TYPE) });
-    }
 
     /** Updates all missed calls to mark them as read. */
     public void markMissedCallsAsRead() {

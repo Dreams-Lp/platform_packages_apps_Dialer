@@ -164,7 +164,6 @@ public class DefaultVoicemailNotifier implements VoicemailNotifier {
                 .setContentText(callers)
                 .setColor(resources.getColor(R.color.dialer_theme_color))
                 .setDefaults(callToNotify != null ? Notification.DEFAULT_ALL : 0)
-                .setDeleteIntent(createMarkNewVoicemailsAsOldIntent())
                 .setAutoCancel(true);
 
         // Determine the intent to fire when the notification is clicked on.
@@ -201,12 +200,7 @@ public class DefaultVoicemailNotifier implements VoicemailNotifier {
         mNotificationManager.notify(NOTIFICATION_TAG, NOTIFICATION_ID, notificationBuilder.build());
     }
 
-    /** Creates a pending intent that marks all new voicemails as old. */
-    private PendingIntent createMarkNewVoicemailsAsOldIntent() {
-        Intent intent = new Intent(mContext, CallLogNotificationsService.class);
-        intent.setAction(CallLogNotificationsService.ACTION_MARK_NEW_VOICEMAILS_AS_OLD);
-        return PendingIntent.getService(mContext, 0, intent, 0);
-    }
+
 
     @Override
     public void clearNotification() {

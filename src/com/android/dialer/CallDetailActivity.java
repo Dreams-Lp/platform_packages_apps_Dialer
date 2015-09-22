@@ -89,7 +89,6 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
 
     /** The enumeration of {@link AsyncTask} objects used in this class. */
     public enum Tasks {
-        MARK_VOICEMAIL_READ,
         DELETE_VOICEMAIL_AND_FINISH,
         REMOVE_FROM_CALL_LOG_AND_FINISH,
         UPDATE_PHONE_CALL_DETAILS,
@@ -311,7 +310,6 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
 
             voicemailContainer.setVisibility(View.VISIBLE);
             mAsyncQueryHandler.startVoicemailStatusQuery(mVoicemailUri);
-            markVoicemailAsRead(mVoicemailUri);
         }
     }
 
@@ -319,18 +317,6 @@ public class CallDetailActivity extends Activity implements ProximitySensorAware
         return mVoicemailUri != null;
     }
 
-    private void markVoicemailAsRead(final Uri voicemailUri) {
-        mAsyncTaskExecutor.submit(Tasks.MARK_VOICEMAIL_READ, new AsyncTask<Void, Void, Void>() {
-            @Override
-            public Void doInBackground(Void... params) {
-                ContentValues values = new ContentValues();
-                values.put(Voicemails.IS_READ, true);
-                getContentResolver().update(voicemailUri, values,
-                        Voicemails.IS_READ + " = 0", null);
-                return null;
-            }
-        });
-    }
 
     /**
      * Returns the list of URIs to show.

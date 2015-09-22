@@ -76,6 +76,10 @@ import com.android.dialer.R;
         views.nameOrNumber = this.getNameOrNumber(details);
     }
 
+    public void setVoicemailReadStatus(int read) {
+        mPhoneCallDetailsHelper.setVoicemailIsRead(read);
+    }
+
     /**
      * Sets the accessibility descriptions for the action buttons in the action button ViewStub.
      *

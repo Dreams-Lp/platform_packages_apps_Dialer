@@ -27,6 +27,7 @@ import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.view.View;
 import android.widget.TextView;
+import android.graphics.Typeface;
 
 import com.android.contacts.common.CallUtil;
 import com.android.contacts.common.testing.NeededForTesting;
@@ -139,6 +140,13 @@ public class PhoneCallDetailsHelper {
 
         views.nameView.setText(nameText);
 
+        if (isVoicemail && mIsRead != 1) {
+            views.nameView.setTypeface(null, Typeface.BOLD);
+        } else {
+            views.nameView.setTypeface(null);
+        }
+
+
         if (isVoicemail && !TextUtils.isEmpty(details.transcription)) {
             views.voicemailTranscriptionView.setText(details.transcription);
             views.voicemailTranscriptionView.setVisibility(View.VISIBLE);
@@ -147,6 +155,14 @@ public class PhoneCallDetailsHelper {
             views.voicemailTranscriptionView.setVisibility(View.GONE);
         }
     }
+
+
+    private int mIsRead;
+
+    public void setVoicemailIsRead(int isRead) {
+        mIsRead = isRead;
+    }
+
 
     /**
      * Builds a string containing the call location and date.

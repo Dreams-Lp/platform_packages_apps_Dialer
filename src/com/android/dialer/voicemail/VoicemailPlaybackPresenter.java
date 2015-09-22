@@ -46,6 +46,9 @@ import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
+import android.content.ContentValues;
+import android.provider.VoicemailContract.Voicemails;
+
 /**
  * Contains the controlling logic for a voicemail playback ui.
  * <p>
@@ -312,6 +315,7 @@ public class VoicemailPlaybackPresenter {
                             mPlayer.setDataSource(mView.getDataSourceContext(), mVoicemailUri);
                             mPlayer.setAudioStreamType(PLAYBACK_STREAM);
                             mPlayer.prepare();
+                            markVoicemailAsRead(mVoicemailUri);
                             mDuration.set(mPlayer.getDuration());
                             return null;
                         } catch (Exception e) {
@@ -328,6 +332,13 @@ public class VoicemailPlaybackPresenter {
                         }
                     }
                 });
+    }
+
+    private void markVoicemailAsRead(final Uri voicemailUri) {
+        ContentValues values = new ContentValues();
+        values.put(Voicemails.IS_READ, true);
+        mView.getDataSourceContext().getContentResolver()
+                .update(voicemailUri, values, Voicemails.IS_READ + " = 0", null);
     }
 
     /**

@@ -658,6 +658,8 @@ public class CallLogAdapter extends GroupingListAdapter
         final long rowId = c.getLong(CallLogQuery.ID);
         views.rowId = rowId;
 
+        final int isRead = c.getInt(CallLogQuery.IS_READ);
+
         // For entries in the call log, check if the day group has changed and display a header
         // if necessary.
         if (mIsCallLog) {
@@ -794,6 +796,7 @@ public class CallLogAdapter extends GroupingListAdapter
                     sourceType, accountHandle, features, dataUsage, transcription);
         }
 
+        mCallLogViewsHelper.setVoicemailReadStatus(isRead);
         mCallLogViewsHelper.setPhoneCallDetails(mContext, views, details);
 
         int contactType = ContactPhotoManager.TYPE_DEFAULT;
